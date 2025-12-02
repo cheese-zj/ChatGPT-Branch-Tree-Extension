@@ -1,29 +1,66 @@
-# Chrome Extensions samples
+# ChatGPT Branch Tree
 
-Official samples for Chrome Extensions and the Chrome Apps platform. (Chrome Apps are deprecated. Learn more [on the Chromium blog](https://blog.chromium.org/2020/08/changes-to-chrome-app-support-timeline.html)).
+A browser extension that visualizes ChatGPT conversation branches as an interactive tree.
 
-For more information on extensions, see [Chrome Developers](https://developer.chrome.com).
+## Features
 
-## Explore samples
-
-The directory structure is as follows:
-
-- [api-samples/](api-samples/) - extensions focused on a single API package
-- [functional-samples/](functional-samples/) - full featured extensions spanning multiple API packages
-- [\_archive/apps/](_archive/apps/) - deprecated Chrome Apps platform (not listed below)
-- [\_archive/mv2/](_archive/mv2/) - resources for manifest version 2
-
-You can also use the [Samples](https://developer.chrome.com/docs/extensions/samples/) page to discover extensions by type, permissions, and extension API.
+- **Visual Tree View**: See your conversation structure as a clean, navigable tree
+- **Branch Tracking**: Automatically tracks when you create branches using "Branch in new chat"
+- **Quick Navigation**: Click any node to scroll to that message or open branched conversations
+- **Hover Details**: Hover over any node to see the full message content
+- **Auto-refresh**: Tree updates automatically as you chat
 
 ## Installation
 
-To experiment with these samples, please clone this repo and use 'Load Unpacked Extension'.
-Read more on [Development Basics](https://developer.chrome.com/docs/extensions/mv3/getstarted/development-basics/#load-unpacked).
+### From Source (Developer Mode)
 
-## Contributing
+1. Clone or download this repository
+2. Open your browser's extension page:
+   - Chrome: `chrome://extensions`
+   - Edge: `edge://extensions`
+   - Brave: `brave://extensions`
+3. Enable "Developer mode"
+4. Click "Load unpacked" and select the extension folder
 
-Please see [the CONTRIBUTING file](/CONTRIBUTING.md) for information on contributing to the `chrome-extensions-samples` project.
+## Usage
+
+1. Navigate to [ChatGPT](https://chatgpt.com) or [chat.openai.com](https://chat.openai.com)
+2. Click the floating toggle button (bottom-right) to open the tree panel
+3. Your conversation tree will load automatically
+4. Click on any message to scroll to it
+5. When you use "Branch in new chat", the extension tracks the relationship
+
+## How It Works
+
+The extension:
+1. Fetches conversation data from ChatGPT's API
+2. Builds a tree structure showing user messages and branch points
+3. Stores branch relationships locally to track conversation history
+4. Displays everything in a clean, dark-themed panel
+
+## Files
+
+- `manifest.json` - Extension configuration
+- `content.js` - Injected into ChatGPT pages, handles data and DOM interaction
+- `panel.html` - Panel UI markup and styles
+- `panel.js` - Panel rendering logic
+- `background.js` - Service worker for cross-tab communication
+
+## Browser Compatibility
+
+Works with all Chromium-based browsers:
+- Google Chrome
+- Microsoft Edge
+- Brave
+- Opera
+- Vivaldi
+
+## Privacy
+
+- All data is stored locally in your browser
+- No external servers or tracking
+- Only communicates with ChatGPT's own API
 
 ## License
 
-`chrome-extensions-samples` are authored by Google and are licensed under the [Apache License, Version 2.0](/LICENSE).
+MIT
