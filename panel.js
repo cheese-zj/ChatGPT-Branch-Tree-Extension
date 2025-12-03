@@ -473,6 +473,7 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
   if (isBranch || hasColorIndex) {
     row.style.setProperty("--branch-color", color);
   }
+  row.dataset.color = color;
   
   // Check what's around us - for T-junction logic
   const nextIsBranch = nextNode?.type === "branch";
@@ -740,6 +741,7 @@ function createNestedBranchElement(node, parentColorIndex, isFirst = false, isLa
   row.style.setProperty("--branch-color", ownColor);
   row.style.setProperty("--parent-color", parentColor);
   row.style.setProperty("--main-color", getColor(0)); // Main line is always depth 0 color
+  row.dataset.color = ownColor;
 
   // Rail (visual connector)
   const rail = document.createElement("div");
@@ -933,37 +935,48 @@ function drawBackbones() {
   const rootRect = treeRoot.getBoundingClientRect();
   const railSize = 20; // matches --rail-size
 
-  // Group nodes by depth with their rects (exclude only nested previews)
+  // Group nodes by depth with their rects/colors (keep nested previews for ordering)
   const nodesByDepth = new Map();
   nodes.forEach(node => {
     const type = node.dataset.type || "";
-    // Skip nested branch previews; they have their own mini rails
-    if (type === "nested-branch") return;
-
     const depth = parseInt(node.dataset.depth || "0", 10);
     const rect = node.getBoundingClientRect();
     const entry = nodesByDepth.get(depth) || [];
-    entry.push({ node, rect });
+    const color =
+      node.dataset.color?.trim() ||
+      getComputedStyle(node).getPropertyValue("--color")?.trim() ||
+      "";
+    entry.push({
+      node,
+      rect,
+      color,
+      type,
+      isBackboneNode: type !== "nested-branch",
+    });
     nodesByDepth.set(depth, entry);
   });
 
   nodesByDepth.forEach((list, depth) => {
     // Sort by vertical position
     list.sort((a, b) => a.rect.top - b.rect.top);
+    let lastColor = null;
     for (let i = 0; i < list.length - 1; i++) {
       const current = list[i];
       const next = list[i + 1];
+      const inheritedColor = current.color || lastColor || getColor(depth);
+      lastColor = inheritedColor;
       const gap = next.rect.top - current.rect.bottom;
 
       // Only fill meaningful gaps (skip near-adjacent nodes)
       if (gap <= 4) continue;
 
+      // Skip connecting through nested previews; they draw their own rails
+      if (!current.isBackboneNode || !next.isBackboneNode) continue;
+
       const backbone = document.createElement("div");
       backbone.className = "tree-backbone";
 
-      // Prefer the node's color (branch/main), fallback to depth color
-      const colorVar = getComputedStyle(current.node).getPropertyValue("--color")?.trim();
-      backbone.style.background = colorVar || getColor(depth);
+      backbone.style.background = inheritedColor;
 
       backbone.style.left = `${(depth * railSize) + (railSize / 2) - 1}px`;
       // Overlap both ends to ensure connection into adjoining connectors
