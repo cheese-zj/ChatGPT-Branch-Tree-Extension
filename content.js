@@ -829,35 +829,25 @@
 
   let pendingBranch = null;
 
-  function isBranchButton(target) {
-    const el = target?.closest?.("button, a");
-    if (!el) return false;
-    const text = el.textContent?.toLowerCase?.() || "";
-    const aria = el.getAttribute?.("aria-label")?.toLowerCase?.() || "";
-    const testId = el.getAttribute?.("data-testid")?.toLowerCase?.() || "";
-    const matchesCopy = text.includes("branch in new chat") || aria.includes("branch in new chat");
-    const matchesSemantic = (text.includes("branch") && text.includes("chat")) || testId.includes("branch");
-    return matchesCopy || matchesSemantic;
-  }
-
   document.addEventListener("click", (e) => {
-    // Detect "Branch in new chat" (handles copy/localization variants)
-    if (!isBranchButton(e.target)) return;
-
-    const convId = getConversationId();
-    if (convId) {
-      // Store timestamp in seconds to match ChatGPT's format
-      const timestampInSeconds = Math.floor(Date.now() / 1000);
-      pendingBranch = {
-        parentId: convId,
-        timestamp: timestampInSeconds,
-      };
-      chrome.storage.local.set({ pendingBranch });
-      debugLog("[BranchTree] Pending branch created:", {
-        parentId: convId,
-        timestamp: timestampInSeconds,
-        date: new Date(timestampInSeconds * 1000).toLocaleString()
-      });
+    // Detect "Branch in new chat" click
+    const text = e.target?.textContent?.trim();
+    if (text === "Branch in new chat") {
+      const convId = getConversationId();
+      if (convId) {
+        // Store timestamp in seconds to match ChatGPT's format
+        const timestampInSeconds = Math.floor(Date.now() / 1000);
+        pendingBranch = {
+          parentId: convId,
+          timestamp: timestampInSeconds,
+        };
+        chrome.storage.local.set({ pendingBranch });
+        debugLog("[BranchTree] Pending branch created:", {
+          parentId: convId,
+          timestamp: timestampInSeconds,
+          date: new Date(timestampInSeconds * 1000).toLocaleString()
+        });
+      }
     }
   }, true);
 
@@ -891,9 +881,9 @@
     try {
       const parentConv = await fetchConversation(pending.parentId);
       parentTimestamps = getMessageTimestamps(parentConv.mapping);
-    debugLog("[BranchTree] Parent timestamps for filtering:", parentTimestamps.size);
+      debugLog("[BranchTree] Parent timestamps for filtering:", parentTimestamps.size);
     } catch (err) {
-    debugLog("[BranchTree] Could not fetch parent for timestamp filtering:", err);
+      debugLog("[BranchTree] Could not fetch parent for timestamp filtering:", err);
     }
 
     // Extract first user message for better branch naming (excluding carry-over messages)

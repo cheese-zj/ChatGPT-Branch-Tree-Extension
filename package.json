@@ -1,8 +1,8 @@
 {
   "name": "chatgpt-branch-tree",
-  "version": "0.2.0",
+  "version": "0.1.4",
   "private": true,
-  "description": "Visualize ChatGPT conversation branches as an interactive tree with navigation and branch history.",
+  "description": "Visualize ChatGPT conversation, display user messages and chat branches as an interactive tree with navigation and branch history.",
   "scripts": {
     "prettier": "prettier . --config .prettierrc.json",
     "lint": "eslint . --ext .js",

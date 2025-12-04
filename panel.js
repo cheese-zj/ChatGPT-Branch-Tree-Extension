@@ -33,6 +33,38 @@ let isRefreshing = false;
 let lastRenderSignature = null;
 let currentConversationId = null;
 
+async function runtimeSendMessageSafe(message) {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve({ error: chrome.runtime.lastError.message });
+          return;
+        }
+        resolve(response);
+      });
+    } catch (err) {
+      resolve({ error: err?.message || String(err) });
+    }
+  });
+}
+
+async function tabsSendMessageSafe(tabId, message) {
+  return new Promise((resolve) => {
+    try {
+      chrome.tabs.sendMessage(tabId, message, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve({ error: chrome.runtime.lastError.message });
+          return;
+        }
+        resolve(response);
+      });
+    } catch (err) {
+      resolve({ error: err?.message || String(err) });
+    }
+  });
+}
+
 // ============================================
 // Settings
 // ============================================
@@ -465,18 +497,12 @@ function isChatUrl(url = "") {
 // ============================================
 
 async function getActiveTab() {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: "GET_ACTIVE_CHAT_TAB" }, (response) => {
-      if (chrome.runtime.lastError || response?.error) {
-        resolve(null);
-        return;
-      }
-      const tab = response?.tab;
-      if (tab?.id) activeTabId = tab.id;
-      if (tab) activeTabInfo = tab;
-      resolve(tab);
-    });
-  });
+  const response = await runtimeSendMessageSafe({ type: "GET_ACTIVE_CHAT_TAB" });
+  if (response?.error) return null;
+  const tab = response?.tab;
+  if (tab?.id) activeTabId = tab.id;
+  if (tab) activeTabInfo = tab;
+  return tab;
 }
 
 // ============================================
@@ -1160,7 +1186,7 @@ async function togglePanelVisibility() {
       setStatus("No active tab");
       return;
     }
-    await chrome.tabs.sendMessage(targetTabId, { type: "TOGGLE_PANEL" });
+    await tabsSendMessageSafe(targetTabId, { type: "TOGGLE_PANEL" });
   } catch (e) {
     setStatus("Close failed");
   }
@@ -1169,23 +1195,8 @@ async function togglePanelVisibility() {
 async function focusMessageInTab(tabId, nodeId, attempts = 6) {
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   for (let i = 0; i < attempts; i++) {
-    const ok = await new Promise((resolve) => {
-      try {
-        chrome.tabs.sendMessage(
-          tabId,
-          { type: "FOCUS_MESSAGE", nodeId },
-          (resp) => {
-            if (chrome.runtime.lastError) {
-              resolve(false);
-              return;
-            }
-            resolve(resp?.ok);
-          }
-        );
-      } catch (e) {
-        resolve(false);
-      }
-    });
+    const resp = await tabsSendMessageSafe(tabId, { type: "FOCUS_MESSAGE", nodeId });
+    const ok = resp?.ok === true;
     if (ok) return true;
     await delay(350 + i * 150);
   }
@@ -1211,7 +1222,7 @@ async function handleNodeClick(node) {
     // Navigate to conversation for branches, branchRoots, or ancestor titles with targetConversationId
     const isNavigableType = type === "branch" || type === "branchRoot" || type === "title" || type === "ancestor-title";
     if (isNavigableType && targetConversationId) {
-      await chrome.runtime.sendMessage({
+      await runtimeSendMessageSafe({
         type: "OPEN_OR_FOCUS_CONVERSATION",
         conversationId: targetConversationId,
         preferredHost,
@@ -1221,7 +1232,7 @@ async function handleNodeClick(node) {
 
     // If the message belongs to another conversation, open/focus it then scroll
     if (destinationConversationId && destinationConversationId !== currentConversationId) {
-      const result = await chrome.runtime.sendMessage({
+      const result = await runtimeSendMessageSafe({
         type: "OPEN_OR_FOCUS_CONVERSATION",
         conversationId: destinationConversationId,
         preferredHost,
@@ -1257,7 +1268,7 @@ async function fetchTree(tab = null) {
 
   try {
     setStatus("Loading...", "loading");
-    const response = await chrome.tabs.sendMessage(targetTab.id, {
+    const response = await tabsSendMessageSafe(targetTab.id, {
       type: "GET_CONVERSATION_TREE",
     });
 
@@ -1390,7 +1401,7 @@ function setupGlobalListeners() {
       try {
         const tab = await getActiveTab();
         if (tab?.id) {
-          await chrome.tabs.sendMessage(tab.id, { type: "CLEAR_CACHE" });
+          await tabsSendMessageSafe(tab.id, { type: "CLEAR_CACHE" });
         }
       } catch (e) {
         // Ignore if we cannot reach the content script

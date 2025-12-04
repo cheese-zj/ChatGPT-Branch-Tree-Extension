@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "ChatGPT Branch Tree",
-  "version": "0.2.0",
-  "description": "Visualize ChatGPT conversation branches as an interactive tree. Track branch history and navigate between related conversations.",
+  "version": "0.1.4",
+  "description": "Visualize ChatGPT conversation, display user messages and chat branches as an interactive tree with navigation and branch history.",
   "permissions": ["tabs", "storage", "scripting"],
   "host_permissions": [
     "https://chatgpt.com/*",
