@@ -30,6 +30,13 @@ A browser extension that visualizes ChatGPT conversation branches as an interact
 4. Click on any message to scroll to it
 5. When you use "Branch in new chat", the extension tracks the relationship
 
+## Permissions
+
+- `tabs`: query the active ChatGPT tab and open/focus conversations
+- `storage`: save branch metadata and settings locally
+- `scripting`: inject the content script when the action button is clicked
+- Host access to `https://chatgpt.com/*` and `https://chat.openai.com/*`
+
 ## How It Works
 
 The extension:
@@ -37,6 +44,23 @@ The extension:
 2. Builds a tree structure showing user messages and branch points
 3. Stores branch relationships locally to track conversation history
 4. Displays everything in a clean, dark-themed panel
+
+## Development
+
+1. Install dependencies: `npm install`
+2. Lint JavaScript: `npm run lint`
+3. Format Markdown/HTML/JSON: `npm run prettier`
+4. Load the folder in `chrome://extensions` (Developer Mode → Load unpacked) to
+   test in your browser
+
+## Manual QA Checklist
+
+- Toggle the panel on a ChatGPT conversation; tree appears and stays in sync
+- Click nodes to scroll to messages; branches open the correct conversations
+- Use “Branch in new chat”; the new chat appears as a child with the first user
+  message as its preview
+- Hover nodes to see the full message content in the tooltip
+- Clearing data resets the tree, pending branch cache, and local titles
 
 ## Files
 

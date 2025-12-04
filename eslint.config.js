@@ -4,8 +4,6 @@ const globals = require('globals');
 const prettier = require('eslint-plugin-prettier');
 const eslintPluginPrettierRecommended = require('eslint-plugin-prettier/recommended');
 
-const jest = require('eslint-plugin-jest');
-
 module.exports = [
   js.configs.recommended,
   eslintPluginPrettierRecommended,
@@ -33,26 +31,6 @@ module.exports = [
         ...globals.es2021,
         ...globals.jquery,
         ...globals.serviceworker
-      }
-    }
-  },
-  {
-    files: [
-      'functional-samples/tutorial.puppeteer/**/*',
-      'functional-samples/tutorial.terminate-sw/**/*'
-    ],
-    plugins: { jest },
-    rules: {
-      ...jest.configs['flat/recommended'].rules
-    },
-    languageOptions: {
-      globals: {
-        ...globals.jest
-      }
-    },
-    settings: {
-      jest: {
-        version: '29.7.0'
       }
     }
   },

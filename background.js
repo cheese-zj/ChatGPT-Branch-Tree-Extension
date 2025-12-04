@@ -60,18 +60,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // Forward tree updates to panel iframe
   if (msg?.type === "TREE_UPDATED") {
-    // Broadcast to all frames (including the panel iframe)
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const tab = tabs?.[0];
-      if (tab?.id) {
-        chrome.tabs.sendMessage(tab.id, msg, () => {
-          // Swallow errors if the content script isn't ready
-          if (chrome.runtime.lastError) {
-            return;
-          }
-        });
+    // Avoid rebroadcast loops
+    if (msg.__fromBackground) {
+      return false;
+    }
+
+    const payload = { ...msg, __fromBackground: true };
+
+    // Broadcast to all extension contexts (panel iframe, etc.)
+    chrome.runtime.sendMessage(payload, () => {
+      // Swallow errors if no listeners are ready
+      if (chrome.runtime.lastError) {
+        return;
       }
     });
+
+    // Also notify the originating tab (keeps content + panel in sync)
+    if (sender?.tab?.id) {
+      chrome.tabs.sendMessage(sender.tab.id, payload, () => {
+        if (chrome.runtime.lastError) {
+          return;
+        }
+      });
+    }
     return false;
   }
 
