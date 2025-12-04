@@ -8,6 +8,29 @@ function isChatUrl(url = "") {
   return /https:\/\/(chatgpt\.com|chat\.openai\.com)/i.test(url);
 }
 
+// Open or focus an existing conversation tab
+async function openOrFocusConversation(conversationId, preferredHost = "chatgpt.com") {
+  const urlPatterns = [
+    "https://chatgpt.com/c/*",
+    "https://chat.openai.com/c/*",
+  ];
+
+  const tabs = await chrome.tabs.query({ url: urlPatterns });
+  const match = tabs.find(t => (t.url || "").includes(`/c/${conversationId}`));
+  if (match?.id) {
+    await chrome.tabs.update(match.id, { active: true });
+    if (match.windowId) {
+      await chrome.windows.update(match.windowId, { focused: true });
+    }
+    return { ok: true, focused: true, tabId: match.id };
+  }
+
+  const host = preferredHost || "chatgpt.com";
+  const url = `https://${host}/c/${conversationId}`;
+  const created = await chrome.tabs.create({ url });
+  return { ok: true, opened: true, tabId: created?.id };
+}
+
 // Message handler
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Get active ChatGPT tab info
@@ -50,6 +73,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
     });
     return false;
+  }
+
+  if (msg?.type === "OPEN_OR_FOCUS_CONVERSATION") {
+    openOrFocusConversation(msg.conversationId, msg.preferredHost)
+      .then(sendResponse)
+      .catch((err) => {
+        sendResponse({ ok: false, error: err?.message || String(err) });
+      });
+    return true; // async
   }
 
   return false;

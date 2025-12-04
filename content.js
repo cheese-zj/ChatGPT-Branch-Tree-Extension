@@ -441,6 +441,7 @@
           // Apply branch color from the branch that led INTO this level
           // Level 0 (root) has no incoming branch, so no colorIndex
           colorIndex: level > 0 ? prevLevelColorIndex : undefined,
+          targetConversationId: ancestor.conversationId,
         });
       }
       userMessages.sort((a, b) => a.createTime - b.createTime);
@@ -564,6 +565,7 @@
         depth: currentDepth,
         isCurrent: true,
         colorIndex: currentColorIndex, // Propagate branch color using colorIndex
+        targetConversationId: currentConvId,
       });
     }
     currentMessages.sort((a, b) => a.createTime - b.createTime);
@@ -664,6 +666,7 @@
         role: "user",
         text,
         createTime,
+        targetConversationId: conversationId,
       });
     }
     
@@ -973,6 +976,7 @@
       frame.style.display = open ? "block" : "none";
       document.body.style.marginRight = open ? `${PANEL_WIDTH}px` : "";
       toggle.style.transform = open ? "rotate(180deg)" : "";
+      toggle.style.display = open ? "none" : "flex";
       chrome.storage.local.set({ [PANEL_STATE_KEY]: open });
     };
 

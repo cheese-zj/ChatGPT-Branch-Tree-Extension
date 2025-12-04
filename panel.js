@@ -10,8 +10,12 @@ const refreshBtn = document.getElementById("refresh");
 const clearDataBtn = document.getElementById("clear-data");
 const tooltip = document.getElementById("tooltip");
 const settingsBtn = document.getElementById("settings-btn");
+const closeBtn = document.getElementById("close-btn");
 const settingsOverlay = document.getElementById("settings-overlay");
 const settingsClose = document.getElementById("settings-close");
+const infoBtn = document.getElementById("info-btn");
+const infoOverlay = document.getElementById("info-overlay");
+const infoClose = document.getElementById("info-close");
 
 // Settings elements
 const settingTheme = document.getElementById("setting-theme");
@@ -22,9 +26,12 @@ const previewLengthValue = document.getElementById("preview-length-value");
 const segmentedBtns = document.querySelectorAll(".segmented-btn");
 
 let activeTabId = null;
+let activeTabInfo = null;
 let refreshDebounceTimer = null;
 let lastStatusState = null;
 let isRefreshing = false;
+let lastRenderSignature = null;
+let currentConversationId = null;
 
 // ============================================
 // Settings
@@ -303,6 +310,37 @@ function markTerminalNodes(nodes) {
 }
 
 /**
+ * Annotate nodes with whether there is a previous/next straight-line node
+ * of the same depth and context (colorIndex). This lets connectors know
+ * when to draw up/down stubs even if intervening nodes are at other depths.
+ */
+function annotateContextContinuations(nodes) {
+  const makeKey = (node) => `${node.depth ?? 0}|${node.colorIndex ?? "main"}`;
+  const shouldTrack = (node) =>
+    node.type !== "branch" && node.type !== "nested-branch";
+
+  const seen = new Set();
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    if (!shouldTrack(node)) continue;
+    const key = makeKey(node);
+    node.hasPrevContext = seen.has(key);
+    seen.add(key);
+  }
+
+  const seenFromEnd = new Set();
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const node = nodes[i];
+    if (!shouldTrack(node)) continue;
+    const key = makeKey(node);
+    node.hasNextContext = seenFromEnd.has(key);
+    seenFromEnd.add(key);
+  }
+
+  return nodes;
+}
+
+/**
  * Get a deterministic color for a branch based on its colorIndex
  * colorIndex is derived from a hash of the conversation ID
  */
@@ -321,6 +359,29 @@ function truncate(text, max = null) {
   const limit = max ?? currentSettings.previewLength ?? 70;
   const clean = text.trim().replace(/\s+/g, " ");
   return clean.length <= limit ? clean : clean.slice(0, limit - 1) + "…";
+}
+
+/**
+ * Generate a stable signature for a render payload so we can skip
+ * re-rendering when nothing changed.
+ */
+function computeRenderSignature(nodes, title, hasAncestry) {
+  try {
+    return JSON.stringify({
+      conversationId: currentConversationId || null,
+      title: title || "",
+      hasAncestry: !!hasAncestry,
+      settings: {
+        previewLength: currentSettings.previewLength,
+        timestampFormat: currentSettings.timestampFormat,
+        showTimestamps: currentSettings.showTimestamps,
+      },
+      nodes: Array.isArray(nodes) ? JSON.parse(JSON.stringify(nodes)) : [],
+    });
+  } catch (e) {
+    // Fallback to force render if we can't serialize for any reason
+    return Math.random().toString(36);
+  }
 }
 
 /**
@@ -412,6 +473,7 @@ async function getActiveTab() {
       }
       const tab = response?.tab;
       if (tab?.id) activeTabId = tab.id;
+      if (tab) activeTabInfo = tab;
       resolve(tab);
     });
   });
@@ -422,7 +484,7 @@ async function getActiveTab() {
 // ============================================
 
 function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
-  const { id, type, role, text, depth, hasChildren, childCount, targetConversationId, createTime, colorIndex, branchIndex, expanded, isCurrent, isCurrentPath, isViewing, branchPath, isTerminal } = node;
+  const { id, type, role, text, depth, hasChildren, childCount, targetConversationId, createTime, colorIndex, branchIndex, expanded, isCurrent, isCurrentPath, isViewing, branchPath, isTerminal, hasPrevContext, hasNextContext, isMainViewing } = node;
   
   // Helper to fetch the rendered row element for a node (by id) if already in DOM
   function prevNodeRow(n) {
@@ -442,11 +504,14 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
   const isTitle = type === "title" || type === "ancestor-title" || type === "current-title";
   const isAncestorTitle = type === "ancestor-title";
   const isCurrentTitle = type === "current-title";
+  const isViewingBranch = isBranch && isViewing;
+  const isMainViewingTitle = isTitle && isMainViewing;
   const isExpanded = expanded === true;
   const isFirst = index === 0;
   const isLast = index === total - 1;
   const hasBranchLabel = isBranch || isBranchRoot;
   const isMessageCard = !isTitle && !hasBranchLabel;
+  const showMainViewingTag = isMainViewingTitle;
   
   if (isBranch) row.classList.add("is-branch");
   if (isBranchRoot) row.classList.add("is-branch-root");
@@ -456,6 +521,8 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
   if (isExpanded) row.classList.add("is-expanded");
   if (isCurrent) row.classList.add("is-current");
   if (isCurrentPath) row.classList.add("is-current-path");
+  if (isViewingBranch) row.classList.add("is-viewing");
+  if (isMainViewingTitle) row.classList.add("is-main-viewing");
   if (isLast) row.classList.add("is-last-node");
   if (isTerminal) row.classList.add("is-terminal");
   // Mark branches that have nested children (for showing connector line to them)
@@ -509,6 +576,7 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
   
   const showAbove = !isFirst && !isBranch && (
     prevHasSameContext || 
+    hasPrevContext ||
     prevIsExpandedBranch ||
     prevBranchContinues ||
     prevNode?.type === "title" || 
@@ -518,7 +586,7 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
   
   // Show line below: has next node in same context that isn't a branch
   // Terminal nodes never show line below
-  const showBelow = !isTerminal && nextHasSameContext;
+  const showBelow = !isTerminal && (nextHasSameContext || hasNextContext);
 
   // Rail (visual connector)
   const rail = document.createElement("div");
@@ -604,11 +672,21 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
       currentLabel.textContent = "Viewing";
       card.appendChild(currentLabel);
     } else {
-      // Root/main title node
-      const mainLabel = document.createElement("div");
-      mainLabel.className = "card-main-label";
-      mainLabel.textContent = "Main";
-      card.appendChild(mainLabel);
+      if (showMainViewingTag) {
+        const titleHeader = document.createElement("div");
+        titleHeader.className = "card-header main-title-header";
+        const combinedTag = document.createElement("span");
+        combinedTag.className = "card-label label-main-viewing title-viewing-tag";
+        combinedTag.textContent = "Main · Viewing";
+        titleHeader.appendChild(combinedTag);
+        card.appendChild(titleHeader);
+      } else {
+        // Root/main title node
+        const mainLabel = document.createElement("div");
+        mainLabel.className = "card-main-label";
+        mainLabel.textContent = "Main";
+        card.appendChild(mainLabel);
+      }
     }
     const titleText = document.createElement("div");
     titleText.className = "card-title-text";
@@ -820,6 +898,13 @@ function createNestedBranchElement(node, parentColorIndex, isFirst = false, isLa
 }
 
 function renderTree(nodes, title, hasAncestry = false) {
+  // Skip re-render if payload is unchanged to avoid double animations
+  const renderSignature = computeRenderSignature(nodes, title, hasAncestry);
+  if (lastRenderSignature && renderSignature === lastRenderSignature) {
+    return;
+  }
+  lastRenderSignature = renderSignature;
+
   // Clear previous node data to prevent memory leaks
   nodeDataMap.clear();
   treeRoot.innerHTML = "";
@@ -858,6 +943,7 @@ function renderTree(nodes, title, hasAncestry = false) {
       text: title,
       depth: 0,
       hasChildren: filteredNodes.length > 0,
+      isMainViewing: !hasAncestry,
     });
   }
   allNodes.push(...filteredNodes);
@@ -884,6 +970,7 @@ function renderTree(nodes, title, hasAncestry = false) {
 
   // Mark terminal nodes before rendering
   markTerminalNodes(allNodes);
+  annotateContextContinuations(allNodes);
 
   const fragment = document.createDocumentFragment();
   let visualIndex = 0; // Track visual position for staggered animation
@@ -1065,27 +1152,91 @@ function setupTreeEventDelegation() {
 // Actions
 // ============================================
 
+async function togglePanelVisibility() {
+  try {
+    const tab = await getActiveTab();
+    const targetTabId = tab?.id || activeTabId;
+    if (!targetTabId) {
+      setStatus("No active tab");
+      return;
+    }
+    await chrome.tabs.sendMessage(targetTabId, { type: "TOGGLE_PANEL" });
+  } catch (e) {
+    setStatus("Close failed");
+  }
+}
+
+async function focusMessageInTab(tabId, nodeId, attempts = 6) {
+  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  for (let i = 0; i < attempts; i++) {
+    const ok = await new Promise((resolve) => {
+      try {
+        chrome.tabs.sendMessage(
+          tabId,
+          { type: "FOCUS_MESSAGE", nodeId },
+          (resp) => {
+            if (chrome.runtime.lastError) {
+              resolve(false);
+              return;
+            }
+            resolve(resp?.ok);
+          }
+        );
+      } catch (e) {
+        resolve(false);
+      }
+    });
+    if (ok) return true;
+    await delay(350 + i * 150);
+  }
+  return false;
+}
+
 async function handleNodeClick(node) {
   if (!activeTabId) return;
 
   const { id, type, targetConversationId } = node;
+  const destinationConversationId = targetConversationId || currentConversationId;
+
+  const preferredHost = (() => {
+    try {
+      const url = new URL(activeTabInfo?.url || "");
+      return url.host || "chatgpt.com";
+    } catch (e) {
+      return "chatgpt.com";
+    }
+  })();
 
   try {
     // Navigate to conversation for branches, branchRoots, or ancestor titles with targetConversationId
     const isNavigableType = type === "branch" || type === "branchRoot" || type === "title" || type === "ancestor-title";
     if (isNavigableType && targetConversationId) {
-      // Navigate to the conversation
-      await chrome.tabs.sendMessage(activeTabId, {
-        type: "OPEN_CONVERSATION",
+      await chrome.runtime.sendMessage({
+        type: "OPEN_OR_FOCUS_CONVERSATION",
         conversationId: targetConversationId,
+        preferredHost,
       });
-    } else {
-      // Scroll to message
-      await chrome.tabs.sendMessage(activeTabId, {
-        type: "FOCUS_MESSAGE",
-        nodeId: id,
-      });
+      return;
     }
+
+    // If the message belongs to another conversation, open/focus it then scroll
+    if (destinationConversationId && destinationConversationId !== currentConversationId) {
+      const result = await chrome.runtime.sendMessage({
+        type: "OPEN_OR_FOCUS_CONVERSATION",
+        conversationId: destinationConversationId,
+        preferredHost,
+      });
+      const targetTabId = result?.tabId || activeTabId;
+      if (targetTabId) {
+        activeTabId = targetTabId;
+        activeTabInfo = { ...(activeTabInfo || {}), id: targetTabId, url: `https://${preferredHost}/c/${destinationConversationId}` };
+        await focusMessageInTab(targetTabId, id);
+      }
+      return;
+    }
+
+    // Same conversation: scroll to message
+    await focusMessageInTab(activeTabId, id);
   } catch (err) {
     setStatus("Action failed");
   }
@@ -1141,7 +1292,10 @@ async function refresh() {
 
   const data = await fetchTree(tab);
   if (data?.nodes) {
+    currentConversationId = data.conversationId || null;
     renderTree(data.nodes, data.title, data.hasAncestry);
+  } else {
+    currentConversationId = null;
   }
   refreshBtn.disabled = false;
   isRefreshing = false;
@@ -1171,11 +1325,19 @@ function closeSettings() {
   settingsOverlay.classList.remove("visible");
 }
 
+function openInfo() {
+  if (infoOverlay) infoOverlay.classList.add("visible");
+}
+
+function closeInfo() {
+  if (infoOverlay) infoOverlay.classList.remove("visible");
+}
+
 // Escape key handler (stored reference to avoid accumulation)
 function handleEscapeKey(e) {
-  if (e.key === "Escape" && settingsOverlay.classList.contains("visible")) {
-    closeSettings();
-  }
+  if (e.key !== "Escape") return;
+  if (settingsOverlay?.classList.contains("visible")) closeSettings();
+  if (infoOverlay?.classList.contains("visible")) closeInfo();
 }
 
 // Setup all global event listeners (called once on init)
@@ -1186,6 +1348,22 @@ function setupGlobalListeners() {
 
   // Settings button handlers
   settingsBtn.addEventListener("click", openSettings);
+  if (closeBtn) {
+    closeBtn.addEventListener("click", () => {
+      togglePanelVisibility();
+    });
+  }
+  if (infoBtn) {
+    infoBtn.addEventListener("click", openInfo);
+  }
+  if (infoOverlay) {
+    infoOverlay.addEventListener("click", (e) => {
+      if (e.target === infoOverlay) closeInfo();
+    });
+  }
+  if (infoClose) {
+    infoClose.addEventListener("click", closeInfo);
+  }
   settingsClose.addEventListener("click", closeSettings);
 
   // Close settings when clicking overlay background
@@ -1226,6 +1404,7 @@ function setupGlobalListeners() {
   // Listen for updates from content script
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg?.type === "TREE_UPDATED" && msg.nodes) {
+      currentConversationId = msg.conversationId || null;
       renderTree(msg.nodes, msg.title, msg.hasAncestry);
       setStatus("Updated", "success");
     }
