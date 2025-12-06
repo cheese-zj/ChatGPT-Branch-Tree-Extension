@@ -1070,11 +1070,11 @@
     Object.assign(frame.style, {
       width: '100%',
       height: '100%',
-      border: '1px 1px 0 0 solid rgba(255, 255, 255, 0.08)',
+      border: '1px 1px 0 0 solid rgba(0, 0, 0, 0.56)',
       pointerEvents: 'auto',
       borderRadius: '20px 0 0 0',
       boxShadow:
-        '0 8px 32px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(255, 255, 255, 0.05)',
+        '0 8px 32px rgba(0, 0, 0, 0.01), 0 0 0 1px rgba(255, 255, 255, 0.05)',
       background: 'transparent'
     });
 
