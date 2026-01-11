@@ -1,10 +1,18 @@
 {
   "manifest_version": 3,
-  "name": "ChatGPT Branch Tree",
-  "version": "0.1.6",
-  "description": "Visualize ChatGPT conversation, display user messages and chat branches as an interactive tree with navigation and branch history.",
-  "permissions": ["tabs", "storage", "scripting"],
-  "host_permissions": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+  "name": "AI Conversation Index",
+  "version": "0.3.0",
+  "description": "Unified conversation indexer for ChatGPT, Claude, Gemini, and Perplexity. Navigate messages, track branches, and view edit versions across AI platforms.",
+  "permissions": ["tabs", "storage", "scripting", "sidePanel", "webRequest"],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://claude.ai/*",
+    "https://api.claude.ai/*",
+    "https://gemini.google.com/*",
+    "https://perplexity.ai/*",
+    "https://www.perplexity.ai/*"
+  ],
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -15,19 +23,23 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*",
+        "https://perplexity.ai/*",
+        "https://www.perplexity.ai/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle"
     }
   ],
-  "web_accessible_resources": [
-    {
-      "resources": ["panel.html", "panel.js"],
-      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"]
-    }
-  ],
+  "side_panel": {
+    "default_path": "panel.html"
+  },
   "action": {
-    "default_title": "ChatGPT Branch Tree",
+    "default_title": "AI Conversation Index",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

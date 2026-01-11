@@ -1,6 +1,7 @@
 /**
- * ChatGPT Branch Tree - Panel Script
+ * AI Conversation Index - Panel Script
  * Renders the conversation tree in the side panel
+ * Supports ChatGPT, Claude, Gemini, Perplexity
  */
 
 const statusEl = document.getElementById('status');
@@ -8,14 +9,15 @@ const statusDot = document.getElementById('status-dot');
 const treeRoot = document.getElementById('tree-root');
 const refreshBtn = document.getElementById('refresh');
 const clearDataBtn = document.getElementById('clear-data');
+const exportMdBtn = document.getElementById('export-markdown');
 const tooltip = document.getElementById('tooltip');
 const settingsBtn = document.getElementById('settings-btn');
-const closeBtn = document.getElementById('close-btn');
 const settingsOverlay = document.getElementById('settings-overlay');
 const settingsClose = document.getElementById('settings-close');
 const infoBtn = document.getElementById('info-btn');
 const infoOverlay = document.getElementById('info-overlay');
 const infoClose = document.getElementById('info-close');
+const platformIndicator = document.getElementById('platform-indicator');
 
 // Settings elements
 const settingTheme = document.getElementById('setting-theme');
@@ -32,6 +34,31 @@ let lastStatusState = null;
 let isRefreshing = false;
 let lastRenderSignature = null;
 let currentConversationId = null;
+
+// Platform configurations
+const PLATFORM_CONFIG = {
+  chatgpt: { name: 'ChatGPT', color: '#10a37f' },
+  claude: { name: 'Claude', color: '#cc785c' },
+  gemini: { name: 'Gemini', color: '#4285f4' },
+  perplexity: { name: 'Perplexity', color: '#20808d' }
+};
+
+/**
+ * Update platform indicator in the UI
+ */
+function updatePlatformIndicator(platform) {
+  if (!platformIndicator) return;
+
+  if (!platform || !PLATFORM_CONFIG[platform]) {
+    platformIndicator.style.display = 'none';
+    return;
+  }
+
+  const config = PLATFORM_CONFIG[platform];
+  platformIndicator.style.display = 'flex';
+  platformIndicator.innerHTML = `<span class="platform-name">${config.name}</span>`;
+  platformIndicator.style.setProperty('--platform-color', config.color);
+}
 
 async function runtimeSendMessageSafe(message) {
   return new Promise((resolve) => {
@@ -86,7 +113,7 @@ async function loadSettings() {
   try {
     const data = await chrome.storage.local.get(SETTINGS_KEY);
     currentSettings = { ...DEFAULT_SETTINGS, ...(data?.[SETTINGS_KEY] || {}) };
-  } catch (e) {
+  } catch {
     currentSettings = { ...DEFAULT_SETTINGS };
   }
   applySettings();
@@ -412,7 +439,7 @@ function computeRenderSignature(nodes, title, hasAncestry) {
       },
       nodes: Array.isArray(nodes) ? JSON.parse(JSON.stringify(nodes)) : []
     });
-  } catch (e) {
+  } catch {
     // Fallback to force render if we can't serialize for any reason
     return Math.random().toString(36);
   }
@@ -494,7 +521,21 @@ function setStatus(text, state = 'ready') {
 }
 
 function isChatUrl(url = '') {
-  return /https:\/\/(chatgpt\.com|chat\.openai\.com)/i.test(url);
+  // Support all platforms: ChatGPT, Claude, Gemini, Perplexity
+  return /https:\/\/(chatgpt\.com|chat\.openai\.com|claude\.ai|gemini\.google\.com|perplexity\.ai)/i.test(
+    url
+  );
+}
+
+/**
+ * Detect platform from URL
+ */
+function detectPlatformFromUrl(url = '') {
+  if (/chatgpt\.com|chat\.openai\.com/i.test(url)) return 'chatgpt';
+  if (/claude\.ai/i.test(url)) return 'claude';
+  if (/gemini\.google\.com/i.test(url)) return 'gemini';
+  if (/perplexity\.ai/i.test(url)) return 'perplexity';
+  return null;
 }
 
 // ============================================
@@ -520,11 +561,8 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
   const {
     id,
     type,
-    role,
     text,
     depth,
-    hasChildren,
-    childCount,
     targetConversationId,
     createTime,
     colorIndex,
@@ -537,7 +575,12 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
     isTerminal,
     hasPrevContext,
     hasNextContext,
-    isMainViewing
+    isMainViewing,
+    // Edit version fields
+    hasEditVersions,
+    editVersionIndex,
+    totalVersions,
+    siblingIds
   } = node;
 
   // Helper to fetch the rendered row element for a node (by id) if already in DOM
@@ -753,10 +796,11 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
     titleText.textContent = truncate(text, 55);
     card.appendChild(titleText);
   } else {
-    // Compact header: label + timestamp inline
+    // Compact header: label + timestamp + edit versions inline
     const timestamp = formatTimestamp(createTime);
     const hasTimestamp = Boolean(timestamp);
-    const needsHeader = hasBranchLabel || hasTimestamp;
+    const hasVersions = hasEditVersions && totalVersions > 1;
+    const needsHeader = hasBranchLabel || hasTimestamp || hasVersions;
 
     if (needsHeader) {
       const header = document.createElement('div');
@@ -786,6 +830,19 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
           label.classList.add('label-branch-root');
         }
         header.appendChild(label);
+      }
+
+      // Edit version indicator (v1/3 style)
+      if (hasVersions && isMessageCard) {
+        const versionTag = document.createElement('span');
+        versionTag.className = 'card-version-tag';
+        versionTag.textContent = `v${editVersionIndex}/${totalVersions}`;
+        versionTag.title = `Version ${editVersionIndex} of ${totalVersions} (edited message)`;
+        // Store sibling IDs for potential future interaction
+        if (siblingIds) {
+          versionTag.dataset.siblingIds = JSON.stringify(siblingIds);
+        }
+        header.appendChild(versionTag);
       }
 
       // Timestamp on the right
@@ -832,16 +889,20 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
   nodeDataMap.set(id, {
     id,
     type,
-    targetConversationId
+    targetConversationId,
+    hasEditVersions,
+    editVersionIndex,
+    totalVersions,
+    siblingIds
   });
 
   return row;
 }
 
 const NO_CONVERSATION_STEPS = [
-  'Open or start a conversation in ChatGPT.',
-  'Use "Branch in new chat" whenever you fork the thread.',
-  'Return here and press Refresh to see the branch tree.'
+  'Open a conversation in ChatGPT, Claude, Gemini, or Perplexity.',
+  'Messages will be indexed automatically for quick navigation.',
+  'Return here and press Refresh to see the message index.'
 ];
 
 function renderGuidanceState({
@@ -918,6 +979,88 @@ function showNoConversationGuidance(description) {
   });
 }
 
+/**
+ * Render skeleton loading state
+ * @param {string|null} title - Optional title to show while loading
+ * @param {boolean} showAncestryLoading - Whether to show ancestry loading indicator
+ */
+function renderSkeleton(title = null, showAncestryLoading = false) {
+  nodeDataMap.clear();
+  lastRenderSignature = null;
+  treeRoot.innerHTML = '';
+
+  const container = document.createElement('div');
+  container.className = 'skeleton-container';
+
+  // Ancestry loading indicator
+  if (showAncestryLoading) {
+    const ancestryLoading = document.createElement('div');
+    ancestryLoading.className = 'skeleton-ancestry-loading';
+    ancestryLoading.innerHTML = `
+      <div class="loading-spinner"></div>
+      <span>Loading branch ancestry...</span>
+    `;
+    container.appendChild(ancestryLoading);
+  }
+
+  // Title skeleton or actual title
+  const titleNode = document.createElement('div');
+  titleNode.className = 'skeleton-title';
+  if (title) {
+    titleNode.innerHTML = `
+      <div class="skeleton-title-dot" style="background: var(--accent); animation: none;"></div>
+      <div class="skeleton-title-bar" style="background: transparent; animation: none; color: var(--text); font-weight: 600; font-size: 13px;">${escapeHtml(truncate(title, 50))}</div>
+    `;
+  } else {
+    titleNode.innerHTML = `
+      <div class="skeleton-title-dot"></div>
+      <div class="skeleton-title-bar"></div>
+    `;
+  }
+  container.appendChild(titleNode);
+
+  // Skeleton nodes (3-4 items to simulate loading)
+  const skeletonConfigs = [
+    { lines: ['long'] },
+    { lines: ['medium'] },
+    { lines: ['short'] },
+    { lines: ['long'] }
+  ];
+
+  skeletonConfigs.forEach((config, idx) => {
+    const node = document.createElement('div');
+    node.className = 'skeleton-node';
+    node.style.animationDelay = `${idx * 100}ms`;
+
+    const dot = document.createElement('div');
+    dot.className = 'skeleton-dot';
+    node.appendChild(dot);
+
+    const card = document.createElement('div');
+    card.className = 'skeleton-card';
+
+    config.lines.forEach((lineClass) => {
+      const line = document.createElement('div');
+      line.className = `skeleton-line ${lineClass}`;
+      card.appendChild(line);
+    });
+
+    node.appendChild(card);
+    container.appendChild(node);
+  });
+
+  treeRoot.appendChild(container);
+}
+
+/**
+ * Escape HTML to prevent XSS
+ */
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text || '';
+  return div.innerHTML;
+}
+
 function isNoConversationError(errorText = '') {
   const lower = errorText.toLowerCase();
   return (
@@ -934,7 +1077,7 @@ function renderTree(nodes, title, hasAncestry = false) {
   // Skip re-render if payload is unchanged to avoid double animations
   const renderSignature = computeRenderSignature(nodes, title, hasAncestry);
   if (lastRenderSignature && renderSignature === lastRenderSignature) {
-    return;
+    return false; // Return false to indicate no render occurred
   }
   lastRenderSignature = renderSignature;
 
@@ -964,7 +1107,7 @@ function renderTree(nodes, title, hasAncestry = false) {
       <span class="empty-state-text">No conversation found</span>
     `;
     treeRoot.appendChild(empty);
-    return;
+    return true; // Still a valid render (empty state)
   }
 
   // Check if nodes already have title nodes (ancestry tree)
@@ -1036,6 +1179,8 @@ function renderTree(nodes, title, hasAncestry = false) {
 
   // Draw colored backbones per depth to bridge gaps (stops at last node)
   drawBackbones();
+
+  return true; // Indicate that rendering actually occurred
 }
 
 /**
@@ -1179,20 +1324,6 @@ function setupTreeEventDelegation() {
 // Actions
 // ============================================
 
-async function togglePanelVisibility() {
-  try {
-    const tab = await getActiveTab();
-    const targetTabId = tab?.id || activeTabId;
-    if (!targetTabId) {
-      setStatus('No active tab');
-      return;
-    }
-    await tabsSendMessageSafe(targetTabId, { type: 'TOGGLE_PANEL' });
-  } catch (e) {
-    setStatus('Close failed');
-  }
-}
-
 async function focusMessageInTab(tabId, nodeId, attempts = 6) {
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   for (let i = 0; i < attempts; i++) {
@@ -1218,7 +1349,7 @@ async function handleNodeClick(node) {
     try {
       const url = new URL(activeTabInfo?.url || '');
       return url.host || 'chatgpt.com';
-    } catch (e) {
+    } catch {
       return 'chatgpt.com';
     }
   })();
@@ -1264,7 +1395,7 @@ async function handleNodeClick(node) {
 
     // Same conversation: scroll to message
     await focusMessageInTab(activeTabId, id);
-  } catch (err) {
+  } catch {
     setStatus('Action failed');
   }
 }
@@ -1305,8 +1436,9 @@ async function refresh() {
 
   if (!tab?.id) {
     currentConversationId = null;
+    updatePlatformIndicator(null);
     showNoConversationGuidance(
-      'Open ChatGPT in a tab and select a conversation to build the tree.'
+      'Open an AI conversation in a tab to build the tree.'
     );
     setStatus('Waiting for chat');
     refreshBtn.disabled = false;
@@ -1316,8 +1448,9 @@ async function refresh() {
 
   if (!isChatUrl(tab.url)) {
     currentConversationId = null;
+    updatePlatformIndicator(null);
     showNoConversationGuidance(
-      'Visit chatgpt.com or chat.openai.com, open any conversation, then press Refresh.'
+      'Visit ChatGPT, Claude, Gemini, or Perplexity and open a conversation, then press Refresh.'
     );
     setStatus('Waiting for chat');
     refreshBtn.disabled = false;
@@ -1325,14 +1458,21 @@ async function refresh() {
     return;
   }
 
+  // Detect and show platform
+  const detectedPlatform = detectPlatformFromUrl(tab.url);
+  updatePlatformIndicator(detectedPlatform);
+
+  // Show skeleton immediately for better perceived performance
   setStatus('Loading...', 'loading');
+  renderSkeleton(null, false);
+
   const data = await fetchTree(tab);
 
   if (data?.error) {
     currentConversationId = null;
     if (isNoConversationError(data.error)) {
       showNoConversationGuidance(
-        'Open a ChatGPT conversation tab, then refresh this panel to load its branches.'
+        'Open a conversation tab, then refresh this panel to load the message index.'
       );
       setStatus('Waiting for chat');
     } else {
@@ -1345,13 +1485,15 @@ async function refresh() {
 
   if (data?.nodes) {
     currentConversationId = data.conversationId || null;
+    // Update platform from response if available
+    if (data.platform) {
+      updatePlatformIndicator(data.platform);
+    }
     renderTree(data.nodes, data.title, data.hasAncestry);
     setStatus('Ready', 'success');
   } else {
     currentConversationId = null;
-    showNoConversationGuidance(
-      'Open a ChatGPT conversation to see its branch tree.'
-    );
+    showNoConversationGuidance('Open a conversation to see the message index.');
     setStatus('Waiting for chat');
   }
   refreshBtn.disabled = false;
@@ -1405,11 +1547,6 @@ function setupGlobalListeners() {
 
   // Settings button handlers
   settingsBtn.addEventListener('click', openSettings);
-  if (closeBtn) {
-    closeBtn.addEventListener('click', () => {
-      togglePanelVisibility();
-    });
-  }
   if (infoBtn) {
     infoBtn.addEventListener('click', openInfo);
   }
@@ -1449,7 +1586,7 @@ function setupGlobalListeners() {
         if (tab?.id) {
           await tabsSendMessageSafe(tab.id, { type: 'CLEAR_CACHE' });
         }
-      } catch (e) {
+      } catch {
         // Ignore if we cannot reach the content script
       }
       setStatus('Data cleared', 'success');
@@ -1458,12 +1595,60 @@ function setupGlobalListeners() {
     }
   });
 
+  // Export as Markdown
+  if (exportMdBtn) {
+    exportMdBtn.addEventListener('click', async () => {
+      const tab = await getActiveTab();
+      if (!tab?.id) {
+        setStatus('No active tab');
+        return;
+      }
+
+      // Update button state to show loading
+      exportMdBtn.disabled = true;
+      exportMdBtn.textContent = 'Exporting...';
+      setStatus('Exporting...', 'loading');
+
+      try {
+        const response = await tabsSendMessageSafe(tab.id, {
+          type: 'EXPORT_MARKDOWN'
+        });
+
+        if (response?.ok) {
+          setStatus(
+            `Exported ${response.messageCount || ''} messages`,
+            'success'
+          );
+          closeSettings();
+        } else {
+          setStatus(response?.error || 'Export failed');
+        }
+      } catch {
+        setStatus('Export failed');
+      } finally {
+        exportMdBtn.disabled = false;
+        exportMdBtn.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+          </svg>
+          Export as Markdown
+        `;
+      }
+    });
+  }
+
   // Listen for updates from content script
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg?.type === 'TREE_UPDATED' && msg.nodes) {
       currentConversationId = msg.conversationId || null;
-      renderTree(msg.nodes, msg.title, msg.hasAncestry);
-      setStatus('Updated', 'success');
+      if (msg.platform) {
+        updatePlatformIndicator(msg.platform);
+      }
+      // Only update status if content actually changed (renderTree returns true)
+      const didRender = renderTree(msg.nodes, msg.title, msg.hasAncestry);
+      if (didRender) {
+        setStatus('Updated', 'success');
+      }
     }
   });
 

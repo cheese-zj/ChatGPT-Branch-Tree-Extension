@@ -122,33 +122,33 @@
         color: var(--text);
         height: 100vh;
         margin: 0;
-        padding: 14px;
+        padding: 12px;
         font-size: 13px;
         line-height: 1.5;
-        border-radius: 16px;
         display: flex;
         flex-direction: column;
         overflow: hidden;
       }
 
-      /* Footer bar - Modern glass-like design, positioned at bottom */
+      /* Footer bar - Simple top-line separator */
       #header {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         margin-top: auto;
-        padding: 10px 12px;
-        background: var(--surface);
-        border-radius: 10px;
-        border: 1px solid var(--border);
+        padding: 8px 10px;
+        background: transparent;
+        border: none;
+        border-top: 1px solid var(--border);
         flex-shrink: 0;
       }
 
       #status-container {
         flex: 1;
+        min-width: 0; /* Allow truncation */
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 5px;
         justify-content: flex-start;
       }
 
@@ -176,24 +176,25 @@
           transform: scale(1);
         }
         50% {
-          opacity: 0.5;
-          transform: scale(0.85);
+          opacity: 0.6;
+          transform: scale(0.9);
         }
       }
 
       #status {
-        font-size: 11px;
+        font-size: 10px;
         color: var(--text-muted);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        max-width: 100%;
       }
 
       /* Tree Container */
       #tree-root {
         position: relative;
         flex: 1;
-        max-height: calc(100vh - 140px);
+        min-height: 0; /* Allow flex child to shrink and enable scrolling */
         overflow-y: auto;
         padding-right: 4px;
       }
@@ -856,11 +857,11 @@
       }
 
       .header-btn {
-        width: 30px;
-        height: 30px;
+        width: 28px;
+        height: 28px;
         background: transparent;
         border: none;
-        border-radius: 8px;
+        border-radius: 6px;
         padding: 0;
         cursor: pointer;
         color: var(--text-muted);
@@ -868,6 +869,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
+        flex-shrink: 0;
       }
 
       .header-btn:hover {
@@ -880,10 +882,9 @@
       }
 
       #settings-btn svg,
-      #close-btn svg,
       #info-btn svg {
-        width: 16px;
-        height: 16px;
+        width: 15px;
+        height: 15px;
         transition: transform 0.3s ease;
       }
 
@@ -1066,6 +1067,20 @@
       .settings-actions button.danger:hover {
         border-color: #ef4444;
         color: #ef4444;
+      }
+
+      .settings-actions button.export {
+        color: var(--text);
+      }
+
+      .settings-actions button.export:hover {
+        border-color: var(--branch);
+        color: var(--branch);
+      }
+
+      .settings-actions button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
       }
 
       #settings-close {
@@ -1284,6 +1299,198 @@
         background: var(--border);
         margin: 12px 0;
       }
+
+      /* Skeleton Loading Animation */
+      @keyframes skeletonPulse {
+        0% {
+          opacity: 0.4;
+        }
+        50% {
+          opacity: 0.7;
+        }
+        100% {
+          opacity: 0.4;
+        }
+      }
+
+      .skeleton-container {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 4px 0;
+      }
+
+      .skeleton-title {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 0;
+      }
+
+      .skeleton-title-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--surface-2);
+        animation: skeletonPulse 1.5s ease-in-out infinite;
+      }
+
+      .skeleton-title-bar {
+        height: 16px;
+        width: 60%;
+        background: var(--surface-2);
+        border-radius: 4px;
+        animation: skeletonPulse 1.5s ease-in-out infinite;
+        animation-delay: 0.1s;
+      }
+
+      .skeleton-node {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 0;
+      }
+
+      .skeleton-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--surface-2);
+        flex-shrink: 0;
+        animation: skeletonPulse 1.5s ease-in-out infinite;
+      }
+
+      .skeleton-card {
+        flex: 1;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .skeleton-line {
+        height: 10px;
+        background: var(--surface-2);
+        border-radius: 3px;
+        animation: skeletonPulse 1.5s ease-in-out infinite;
+      }
+
+      .skeleton-line.short {
+        width: 40%;
+      }
+
+      .skeleton-line.medium {
+        width: 70%;
+      }
+
+      .skeleton-line.long {
+        width: 90%;
+      }
+
+      .skeleton-node:nth-child(1) .skeleton-line {
+        animation-delay: 0s;
+      }
+
+      .skeleton-node:nth-child(2) .skeleton-line {
+        animation-delay: 0.15s;
+      }
+
+      .skeleton-node:nth-child(3) .skeleton-line {
+        animation-delay: 0.3s;
+      }
+
+      .skeleton-node:nth-child(4) .skeleton-line {
+        animation-delay: 0.45s;
+      }
+
+      .skeleton-node:nth-child(5) .skeleton-line {
+        animation-delay: 0.6s;
+      }
+
+      /* Loading ancestry indicator */
+      .skeleton-ancestry-loading {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        margin-bottom: 8px;
+        background: color-mix(in srgb, var(--accent) 8%, transparent);
+        border: 1px dashed color-mix(in srgb, var(--accent) 30%, transparent);
+        border-radius: 6px;
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      .skeleton-ancestry-loading .loading-spinner {
+        width: 12px;
+        height: 12px;
+        border: 2px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* Platform Indicator */
+      #platform-indicator {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        background: color-mix(
+          in srgb,
+          var(--platform-color, var(--accent)) 12%,
+          transparent
+        );
+        border: 1px solid
+          color-mix(
+            in srgb,
+            var(--platform-color, var(--accent)) 25%,
+            transparent
+          );
+        border-radius: 6px;
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--platform-color, var(--accent));
+      }
+
+      .platform-name {
+        letter-spacing: 0.02em;
+      }
+
+      /* Edit Version Tag */
+      .card-version-tag {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 6px;
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
+        border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+        border-radius: 4px;
+        font-size: 9px;
+        font-weight: 600;
+        color: var(--accent);
+        cursor: help;
+        transition: all 0.15s ease;
+      }
+
+      .card-version-tag:hover {
+        background: color-mix(in srgb, var(--accent) 20%, transparent);
+        border-color: var(--accent);
+      }
+
+      /* Compact mode adjustments for version tag */
+      body.compact-mode .card-version-tag {
+        padding: 1px 4px;
+        font-size: 8px;
+      }
     </style>
   </head>
   <body>
@@ -1291,6 +1498,7 @@
       <div id="tooltip" class="tooltip"></div>
     </div>
     <div id="header">
+      <div id="platform-indicator" style="display: none"></div>
       <div id="status-container">
         <span id="status-dot"></span>
         <span id="status">Ready</span>
@@ -1333,21 +1541,6 @@
               stroke-linecap="round"
               stroke-linejoin="round"
               d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"
-            />
-          </svg>
-        </button>
-        <button id="close-btn" class="header-btn" title="Close panel">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke-width="1.5"
-            stroke="currentColor"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M6 18 18 6M6 6l12 12"
             />
           </svg>
         </button>
@@ -1452,6 +1645,22 @@
             </svg>
             Refresh Tree
           </button>
+          <button id="export-markdown" class="export">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke-width="1.5"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
+              />
+            </svg>
+            Export as Markdown
+          </button>
           <button id="clear-data" class="danger">
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -1477,13 +1686,15 @@
     <div id="info-overlay">
       <div id="info-modal">
         <div class="info-header">
-          <span>Branch Tree · Info</span>
+          <span>AI Conversation Index · Info</span>
           <button id="info-close" class="info-close">Close</button>
         </div>
         <div class="info-content">
           <div>
-            <strong>Branch Tree</strong> keeps a live map of your ChatGPT
-            branches so you can jump around without losing context.
+            <strong>AI Conversation Index</strong> provides unified message
+            navigation across ChatGPT, Claude, Gemini, and Perplexity. Track
+            branches, view edit versions, and jump between messages without
+            losing context.
           </div>
           <div><strong>Made by:</strong> James (jameszhao2004@gmail.com)</div>
           <div>
@@ -1495,22 +1706,26 @@
               >buymeacoffee.com/jameszhao</a
             >
           </div>
+          <div><strong>Supported Platforms:</strong></div>
+          <ul class="info-list">
+            <li>🤖 ChatGPT - Full branch tracking + edit versions</li>
+            <li>🧠 Claude - Message indexing + edit versions</li>
+            <li>✨ Gemini - Message indexing + drafts</li>
+            <li>🔍 Perplexity - Message indexing</li>
+          </ul>
           <div><strong>Tips:</strong></div>
           <ul class="info-list">
             <li>
-              Open any ChatGPT thread and keep chatting; new branches show up
+              The <strong>v1/3</strong> tag shows when a message has multiple
+              versions (from editing or regenerating).
+            </li>
+            <li>Click any message to jump to it in the conversation.</li>
+            <li>
+              ChatGPT branches (via "Branch in new chat") are tracked
               automatically.
             </li>
-            <li>
-              Click a node to jump to that message; collapsed branches keep a
-              short preview.
-            </li>
-            <li>
-              Use the toolbar buttons to refresh the tree, adjust settings, or
-              hide the panel.
-            </li>
           </ul>
-          <div><strong>Version:</strong> 0.1.5</div>
+          <div><strong>Version:</strong> 0.3.0</div>
         </div>
       </div>
     </div>
