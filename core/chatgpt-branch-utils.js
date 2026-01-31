@@ -12,6 +12,27 @@ export function isPreBranchChatGPTId(id) {
   return typeof id === 'string' ? /^WEB:/i.test(id) : false;
 }
 
+export function selectFirstMessageAfterTimestamp(messages, timestampSeconds) {
+  if (!Array.isArray(messages) || messages.length === 0) return null;
+  const sorted = messages
+    .map((message) => ({
+      text: typeof message?.text === 'string' ? message.text : '',
+      createTime:
+        typeof message?.createTime === 'number' ? message.createTime : 0
+    }))
+    .filter((message) => message.text)
+    .sort((a, b) => a.createTime - b.createTime);
+
+  if (!sorted.length) return null;
+  if (typeof timestampSeconds === 'number') {
+    const match = sorted.find(
+      (message) => message.createTime >= timestampSeconds
+    );
+    if (match) return match.text;
+  }
+  return sorted[0].text;
+}
+
 export function findParentBranch(branchData, childId) {
   if (!branchData?.branches || !childId) return null;
   for (const [parentId, branches] of Object.entries(branchData.branches)) {

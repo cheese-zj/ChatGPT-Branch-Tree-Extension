@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
     cleanChatGPTConversationId,
     extractChatGPTConversationIdFromPath,
     isPreBranchChatGPTId,
+    selectFirstMessageAfterTimestamp,
     findParentBranch,
     buildBranchContextNodes
   } = await import('../core/chatgpt-branch-utils.js');
@@ -64,6 +65,23 @@ const assert = require('node:assert/strict');
   assert.equal(context.branchNodes[1].isViewing, true);
   assert.equal(context.branchNodes[0].branchLabel, 'Branch: Child A');
   assert.equal(context.branchNodes[0].icon, 'branch');
+
+  // selectFirstMessageAfterTimestamp
+  const messageSample = [
+    { text: 'old', createTime: 1 },
+    { text: 'new', createTime: 5 }
+  ];
+  assert.equal(selectFirstMessageAfterTimestamp(messageSample, 4), 'new');
+  assert.equal(selectFirstMessageAfterTimestamp(messageSample, 10), 'old');
+  assert.equal(selectFirstMessageAfterTimestamp(messageSample, null), 'old');
+
+  const unsortedSample = [
+    { text: 'later', createTime: 9 },
+    { text: 'first', createTime: 2 },
+    { text: '', createTime: 4 }
+  ];
+  assert.equal(selectFirstMessageAfterTimestamp(unsortedSample, 3), 'later');
+  assert.equal(selectFirstMessageAfterTimestamp(unsortedSample, 0), 'first');
 })().catch((err) => {
   console.error(err);
   process.exit(1);
