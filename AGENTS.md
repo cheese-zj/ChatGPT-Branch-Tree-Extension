@@ -58,8 +58,8 @@ npx prettier --write path/to/file.js
 ### 2.4 Build / Test
 
 - **没有专用 build 脚本**。开发时用浏览器“Load unpacked”。
-- **没有自动化测试脚本**。如果需要验证功能，请执行 README 的 Manual QA Checklist。
-- 若未来新增测试，请补充 `package.json` 的 `test` 脚本，并在此处说明单测运行方式。
+- **有简单自动化测试脚本**。运行：`npm test`。
+- 仍建议按 README 的 Manual QA Checklist 做浏览器侧验证。
 
 ---
 
