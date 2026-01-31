@@ -7,7 +7,7 @@
     "prettier": "prettier . --config .prettierrc.json",
     "lint": "eslint . --ext .js",
     "lint:fix": "npm run lint -- --fix",
-    "test": "node --no-warnings tests/chatgpt-branch-utils.test.js",
+    "test": "node --no-warnings tests/chatgpt-branch-utils.test.js && node --no-warnings tests/panel-icons.test.js",
     "prepare": "husky install"
   },
   "keywords": [],

@@ -271,6 +271,13 @@ const BRANCH_COLORS = [
   '#f43f5e' // rose
 ];
 
+const ICON_SVGS = {
+  branch:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"></path><path d="M6 9v6"></path><path d="M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"></path><path d="M18 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"></path><path d="M18 9c0 4-6 4-6 9"></path></svg>',
+  edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path></svg>',
+  info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 10v6"></path><path d="M12 7h.01"></path></svg>'
+};
+
 function getColor(depth) {
   return DEPTH_COLORS[depth % DEPTH_COLORS.length];
 }
@@ -786,10 +793,17 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
   if (isPreBranchIndicator) {
     const indicatorBanner = document.createElement('div');
     indicatorBanner.className = 'pre-branch-banner';
-    indicatorBanner.innerHTML = `
-      <span class="pre-branch-icon">ℹ️</span>
-      <span class="pre-branch-text">${text}</span>
-    `;
+    const infoIcon = document.createElement('span');
+    infoIcon.className = 'pre-branch-icon';
+    if (ICON_SVGS.info) {
+      infoIcon.innerHTML = ICON_SVGS.info;
+      infoIcon.setAttribute('aria-hidden', 'true');
+    }
+    const infoText = document.createElement('span');
+    infoText.className = 'pre-branch-text';
+    infoText.textContent = text;
+    indicatorBanner.appendChild(infoIcon);
+    indicatorBanner.appendChild(infoText);
     card.appendChild(indicatorBanner);
   } else if (isTitle) {
     if (isAncestorTitle) {
@@ -845,12 +859,9 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
         if (icon) {
           const iconEl = document.createElement('span');
           iconEl.className = 'card-icon';
-          if (icon === 'edit') {
-            iconEl.textContent = '✏️'; // Pencil icon for edit branches
-            iconEl.setAttribute('aria-label', 'Edit version');
-          } else if (icon === 'branch') {
-            iconEl.textContent = '🔀'; // Fork icon for real branches
-            iconEl.setAttribute('aria-label', 'Branch conversation');
+          if (ICON_SVGS[icon]) {
+            iconEl.innerHTML = ICON_SVGS[icon];
+            iconEl.setAttribute('aria-hidden', 'true');
           }
           label.appendChild(iconEl);
         }
