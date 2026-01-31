@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
   const {
     cleanChatGPTConversationId,
     extractChatGPTConversationIdFromPath,
+    isPreBranchChatGPTId,
     findParentBranch,
     buildBranchContextNodes
   } = await import('../core/chatgpt-branch-utils.js');
@@ -19,10 +20,20 @@ const assert = require('node:assert/strict');
     'WEB:abc-123'
   );
   assert.equal(
+    extractChatGPTConversationIdFromPath('/c/web:abc-123'),
+    'web:abc-123'
+  );
+  assert.equal(
     extractChatGPTConversationIdFromPath('/c/abc-123'),
     'abc-123'
   );
   assert.equal(extractChatGPTConversationIdFromPath('/foo'), null);
+
+  // isPreBranchChatGPTId
+  assert.equal(isPreBranchChatGPTId('WEB:abc-123'), true);
+  assert.equal(isPreBranchChatGPTId('web:abc-123'), true);
+  assert.equal(isPreBranchChatGPTId('abc-123'), false);
+  assert.equal(isPreBranchChatGPTId(null), false);
 
   // findParentBranch + buildBranchContextNodes
   const branchData = {
@@ -51,6 +62,8 @@ const assert = require('node:assert/strict');
   assert.equal(context.branchRoot?.type, 'branchRoot');
   assert.equal(context.branchNodes.length, 2);
   assert.equal(context.branchNodes[1].isViewing, true);
+  assert.equal(context.branchNodes[0].branchLabel, 'Branch: Child A');
+  assert.equal(context.branchNodes[0].icon, 'branch');
 })().catch((err) => {
   console.error(err);
   process.exit(1);

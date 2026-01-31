@@ -286,14 +286,17 @@
     isCurrent = false,
     retryOnAuthError = true
   ) {
+    const cleanId = cleanChatGPTConversationId(conversationId);
+    if (!cleanId) throw new Error('No conversation ID found');
+
     if (useCache) {
-      const cached = await getCachedConversation(conversationId, isCurrent);
+      const cached = await getCachedConversation(cleanId, isCurrent);
       if (cached) return cached;
     }
 
     const token = await getAccessToken();
     const res = await fetch(
-      `${getBaseUrl()}/backend-api/conversation/${conversationId}`,
+      `${getBaseUrl()}/backend-api/conversation/${cleanId}`,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -315,7 +318,7 @@
 
     if (!res.ok) throw new Error(`Conversation fetch failed: ${res.status}`);
     const data = await res.json();
-    await setCachedConversation(conversationId, data);
+    await setCachedConversation(cleanId, data);
     return data;
   }
 
@@ -1637,6 +1640,76 @@
   // Tree Building (simplified for multi-platform)
   // ============================================
 
+  function cleanChatGPTConversationId(id) {
+    if (!id) return null;
+    return id.replace(/^WEB:/i, '');
+  }
+
+  function extractChatGPTConversationIdFromPath(pathname = '') {
+    const match = pathname.match(/\/c\/((?:WEB:)?[0-9a-f-]+)/i);
+    return match?.[1] || null;
+  }
+
+  function isPreBranchChatGPTId(id) {
+    return typeof id === 'string' ? /^WEB:/i.test(id) : false;
+  }
+
+  function findParentBranch(branchData, childId) {
+    if (!branchData?.branches || !childId) return null;
+    for (const [parentId, branches] of Object.entries(branchData.branches)) {
+      const idx = branches.findIndex((branch) => branch.childId === childId);
+      if (idx >= 0) {
+        return { parentId, branchIndex: idx, branch: branches[idx] };
+      }
+    }
+    return null;
+  }
+
+  function buildBranchContextNodes({
+    branchData,
+    parentId,
+    currentConversationId
+  }) {
+    if (!branchData || !parentId) {
+      return { ancestorTitle: null, branchRoot: null, branchNodes: [] };
+    }
+
+    const parentTitle = branchData.titles?.[parentId] || 'Conversation';
+
+    const ancestorTitle = {
+      id: `ancestor-title:${parentId}`,
+      type: 'ancestor-title',
+      text: parentTitle,
+      depth: 0,
+      targetConversationId: parentId,
+      isMainViewing: false
+    };
+
+    const branchRoot = {
+      id: `branch-root:${parentId}`,
+      type: 'branchRoot',
+      text: parentTitle,
+      depth: 0,
+      targetConversationId: parentId
+    };
+
+    const branches = branchData.branches?.[parentId] || [];
+    const branchNodes = branches.map((branch, idx) => ({
+      id: `branch:${branch.childId}`,
+      type: 'branch',
+      text: branch.firstMessage || branch.title || 'Branched conversation',
+      createTime: toSeconds(branch.createdAt || 0),
+      targetConversationId: branch.childId,
+      branchIndex: idx,
+      branchLabel: `Branch: ${branch.title || 'New Chat'}`,
+      depth: 1,
+      icon: 'branch',
+      isViewing: branch.childId === currentConversationId
+    }));
+
+    return { ancestorTitle, branchRoot, branchNodes };
+  }
+
   function buildDisplayList(messages, branchData, conversationId, title) {
     const result = [];
     const branches = branchData?.branches?.[conversationId] || [];
@@ -1709,9 +1782,8 @@
 
     switch (platform) {
       case 'chatgpt': {
-        // Match both regular IDs and WEB: prefixed pre-branch IDs
-        const chatgptMatch = pathname.match(/\/c\/((?:WEB:)?[0-9a-f-]+)/i);
-        return chatgptMatch?.[1] || null;
+        const rawId = extractChatGPTConversationIdFromPath(pathname);
+        return cleanChatGPTConversationId(rawId);
       }
 
       case 'claude': {
@@ -1799,9 +1871,21 @@
     if (currentUrl !== lastContentUrl) {
       const platform = detectPlatform();
       if (platform === 'chatgpt') {
-        const oldMatch = lastContentUrl.match(/\/c\/([0-9a-f-]+)/i);
-        const newMatch = currentUrl.match(/\/c\/([0-9a-f-]+)/i);
-        if (oldMatch?.[1] && newMatch?.[1] && oldMatch[1] !== newMatch[1]) {
+        const oldRaw = extractChatGPTConversationIdFromPath(
+          new URL(lastContentUrl).pathname
+        );
+        const newRaw = extractChatGPTConversationIdFromPath(
+          new URL(currentUrl).pathname
+        );
+        const oldClean = cleanChatGPTConversationId(oldRaw);
+        const newClean = cleanChatGPTConversationId(newRaw);
+        const preBranchChanged =
+          isPreBranchChatGPTId(oldRaw) !== isPreBranchChatGPTId(newRaw);
+        if (
+          oldClean &&
+          newClean &&
+          (oldClean !== newClean || preBranchChanged)
+        ) {
           // Navigation to a different conversation - check pending
           scheduleRefresh(300);
         }
@@ -1950,6 +2034,12 @@
       return { error: 'Unsupported platform' };
     }
 
+    const rawChatGPTId =
+      platform === 'chatgpt'
+        ? extractChatGPTConversationIdFromPath(location.pathname)
+        : null;
+    const isPreBranch =
+      platform === 'chatgpt' ? isPreBranchChatGPTId(rawChatGPTId) : false;
     const conversationId = getConversationId(platform);
     if (!conversationId) {
       return { error: 'No conversation ID found' };
@@ -1959,6 +2049,7 @@
       let messages = [];
       let title = 'Conversation';
       let branchData = await loadBranchData();
+      let hasAncestry = false;
 
       if (platform === 'chatgpt') {
         // Use API for ChatGPT
@@ -1994,19 +2085,72 @@
       await saveBranchData(branchData);
 
       // Build display list
-      const nodes = buildDisplayList(
+      const parentInfo =
+        platform === 'chatgpt'
+          ? findParentBranch(branchData, conversationId)
+          : null;
+      const baseNodes = buildDisplayList(
         messages,
         branchData,
         conversationId,
-        title
+        parentInfo ? null : title
       );
+
+      let nodes = baseNodes;
+
+      if (parentInfo) {
+        const context = buildBranchContextNodes({
+          branchData,
+          parentId: parentInfo.parentId,
+          currentConversationId: conversationId
+        });
+
+        const currentTitleNode = {
+          id: `current-title:${conversationId}`,
+          type: 'current-title',
+          text: title,
+          depth: 0,
+          targetConversationId: conversationId,
+          isMainViewing: true
+        };
+
+        nodes = [
+          context.ancestorTitle,
+          context.branchRoot,
+          ...context.branchNodes,
+          currentTitleNode,
+          ...baseNodes
+        ].filter(Boolean);
+        hasAncestry = true;
+      }
+
+      if (platform === 'chatgpt' && isPreBranch) {
+        const indicator = {
+          id: 'pre-branch-indicator',
+          type: 'preBranchIndicator',
+          text: 'You are viewing a branch preview. Send a message to create a new branch.',
+          depth: 0,
+          isPersistent: true
+        };
+        const insertAfterIndex = nodes.findIndex(
+          (node) =>
+            node.type === 'current-title' ||
+            node.type === 'title' ||
+            node.type === 'ancestor-title'
+        );
+        if (insertAfterIndex >= 0) {
+          nodes.splice(insertAfterIndex + 1, 0, indicator);
+        } else {
+          nodes.unshift(indicator);
+        }
+      }
 
       return {
         conversationId,
         title,
         nodes,
         platform,
-        hasAncestry: false
+        hasAncestry
       };
     } catch (err) {
       return { error: err.message || String(err) };

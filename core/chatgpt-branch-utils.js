@@ -8,6 +8,10 @@ export function extractChatGPTConversationIdFromPath(pathname = '') {
   return match?.[1] || null;
 }
 
+export function isPreBranchChatGPTId(id) {
+  return typeof id === 'string' ? /^WEB:/i.test(id) : false;
+}
+
 export function findParentBranch(branchData, childId) {
   if (!branchData?.branches || !childId) return null;
   for (const [parentId, branches] of Object.entries(branchData.branches)) {
