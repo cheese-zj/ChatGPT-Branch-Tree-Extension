@@ -18,6 +18,7 @@ const infoBtn = document.getElementById('info-btn');
 const infoOverlay = document.getElementById('info-overlay');
 const infoClose = document.getElementById('info-close');
 const platformIndicator = document.getElementById('platform-indicator');
+const exportMdBtnIdleMarkup = exportMdBtn?.innerHTML || '';
 
 // Settings elements
 const settingTheme = document.getElementById('setting-theme');
@@ -34,6 +35,7 @@ let lastStatusState = null;
 let isRefreshing = false;
 let lastRenderSignature = null;
 let currentConversationId = null;
+let currentSearchQuery = '';
 
 // Platform configurations
 const PLATFORM_CONFIG = {
@@ -308,6 +310,12 @@ function markTerminalNodes(nodes) {
     const node = nodes[i];
     const nextNode = nodes[i + 1];
 
+    // Edit branches are always terminal (standalone nodes)
+    if (node.type === 'editBranch') {
+      node.isTerminal = true;
+      continue;
+    }
+
     // Branches have their own terminal logic
     if (node.type === 'branch') {
       // A branch is terminal if there are no more same-context nodes after it
@@ -580,7 +588,14 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
     hasEditVersions,
     editVersionIndex,
     totalVersions,
-    siblingIds
+    siblingIds,
+    // Edit branch fields
+    branchNodeId,
+    editVersionLabel,
+    descendantCount,
+    // Icon and label fields
+    icon,
+    branchLabel
   } = node;
 
   // Helper to fetch the rendered row element for a node (by id) if already in DOM
@@ -593,11 +608,14 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
   row.className = 'tree-node';
   row.dataset.nodeId = id;
   row.dataset.depth = depth ?? 0;
+  row.tabIndex = 0;
   // Staggered animation delay (max 15 nodes, 30ms each)
   row.style.animationDelay = `${Math.min(index, 15) * 30}ms`;
 
   const isBranch = type === 'branch';
+  const isEditBranch = type === 'editBranch';
   const isBranchRoot = type === 'branchRoot';
+  const isPreBranchIndicator = type === 'preBranchIndicator';
   const isTitle =
     type === 'title' || type === 'ancestor-title' || type === 'current-title';
   const isAncestorTitle = type === 'ancestor-title';
@@ -607,12 +625,14 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
   const isExpanded = expanded === true;
   const isFirst = index === 0;
   const isLast = index === total - 1;
-  const hasBranchLabel = isBranch || isBranchRoot;
-  const isMessageCard = !isTitle && !hasBranchLabel;
+  const hasBranchLabel = isBranch || isBranchRoot || isEditBranch;
+  const isMessageCard = !isTitle && !hasBranchLabel && !isPreBranchIndicator;
   const showMainViewingTag = isMainViewingTitle;
 
   if (isBranch) row.classList.add('is-branch');
+  if (isEditBranch) row.classList.add('is-edit-branch');
   if (isBranchRoot) row.classList.add('is-branch-root');
+  if (isPreBranchIndicator) row.classList.add('is-pre-branch-indicator');
   if (isTitle) row.classList.add('is-title');
   if (isAncestorTitle) row.classList.add('is-ancestor-title');
   if (isCurrentTitle) row.classList.add('is-current-title');
@@ -760,9 +780,18 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
   if (isCurrentTitle) card.classList.add('current-card');
   if (isExpanded) card.classList.add('expanded-card');
   if (isMessageCard) card.classList.add('message-card');
+  if (isPreBranchIndicator) card.classList.add('pre-branch-indicator-card');
 
-  // For title nodes, show the title text with optional label
-  if (isTitle) {
+  // For pre-branch indicator, show an info banner
+  if (isPreBranchIndicator) {
+    const indicatorBanner = document.createElement('div');
+    indicatorBanner.className = 'pre-branch-banner';
+    indicatorBanner.innerHTML = `
+      <span class="pre-branch-icon">ℹ️</span>
+      <span class="pre-branch-text">${text}</span>
+    `;
+    card.appendChild(indicatorBanner);
+  } else if (isTitle) {
     if (isAncestorTitle) {
       const ancestorLabel = document.createElement('div');
       ancestorLabel.className = 'card-ancestor-label';
@@ -807,29 +836,61 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
       header.className = 'card-header';
       if (isMessageCard) header.classList.add('message-header');
 
-      // Only show labels for branches and branchRoots, not regular messages
-      if (type === 'branch' || type === 'branchRoot') {
+      // Only show labels for branches, editBranches, and branchRoots
+      if (type === 'branch' || type === 'branchRoot' || type === 'editBranch') {
         const label = document.createElement('span');
         label.className = 'card-label';
-        if (type === 'branch') {
-          // Use hierarchical branch path (e.g., "1", "1.1", "1.1.1")
+
+        // Add icon if specified
+        if (icon) {
+          const iconEl = document.createElement('span');
+          iconEl.className = 'card-icon';
+          if (icon === 'edit') {
+            iconEl.textContent = '✏️'; // Pencil icon for edit branches
+            iconEl.setAttribute('aria-label', 'Edit version');
+          } else if (icon === 'branch') {
+            iconEl.textContent = '🔀'; // Fork icon for real branches
+            iconEl.setAttribute('aria-label', 'Branch conversation');
+          }
+          label.appendChild(iconEl);
+        }
+
+        const labelText = document.createElement('span');
+        labelText.className = 'card-label-text';
+
+        if (type === 'editBranch') {
+          labelText.textContent = editVersionLabel || 'Edit';
+          label.classList.add('label-edit-branch');
+          label.appendChild(labelText);
+          if (descendantCount > 0) {
+            const countBadge = document.createElement('span');
+            countBadge.className = 'card-descendant-count';
+            countBadge.textContent = `${descendantCount} msg${descendantCount !== 1 ? 's' : ''}`;
+            header.appendChild(label);
+            header.appendChild(countBadge);
+          } else {
+            header.appendChild(label);
+          }
+        } else if (type === 'branch') {
           const pathLabel = branchPath || `${(branchIndex ?? 0) + 1}`;
           if (isViewing) {
-            // Show "Viewing" tag; branch number is shown on its own line below
-            label.textContent = 'Viewing';
+            labelText.textContent = branchLabel || 'Viewing';
             label.classList.add('label-viewing');
           } else if (isExpanded) {
-            label.textContent = `Branch ${pathLabel}`;
+            labelText.textContent = branchLabel || `Branch ${pathLabel}`;
             label.classList.add('label-expanded');
           } else {
-            label.textContent = `Branch ${pathLabel}`;
+            labelText.textContent = branchLabel || `Branch ${pathLabel}`;
           }
           label.classList.add('label-branch');
+          label.appendChild(labelText);
+          header.appendChild(label);
         } else {
-          label.textContent = 'From';
+          labelText.textContent = 'From';
           label.classList.add('label-branch-root');
+          label.appendChild(labelText);
+          header.appendChild(label);
         }
-        header.appendChild(label);
       }
 
       // Edit version indicator (v1/3 style)
@@ -893,7 +954,8 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
     hasEditVersions,
     editVersionIndex,
     totalVersions,
-    siblingIds
+    siblingIds,
+    branchNodeId
   });
 
   return row;
@@ -907,7 +969,7 @@ const NO_CONVERSATION_STEPS = [
 
 function renderGuidanceState({
   badge = 'Waiting for a conversation',
-  title = 'Open a ChatGPT conversation to map branches',
+  title = 'Open a conversation in ChatGPT, Claude, Gemini, or Perplexity',
   description = '',
   steps = [],
   hint = 'After you open a chat, press Refresh to retry.'
@@ -970,10 +1032,10 @@ function renderGuidanceState({
 function showNoConversationGuidance(description) {
   renderGuidanceState({
     badge: 'No conversation detected',
-    title: 'Open a ChatGPT conversation to map branches',
+    title: 'Open a conversation in ChatGPT, Claude, Gemini, or Perplexity',
     description:
       description ||
-      'Visit chatgpt.com or chat.openai.com, open any conversation, then press Refresh.',
+      'Visit chatgpt.com, claude.ai, gemini.google.com, or perplexity.ai, open any conversation, then press Refresh.',
     steps: NO_CONVERSATION_STEPS,
     hint: 'Once a chat is open, hit Refresh to load the tree.'
   });
@@ -1061,6 +1123,39 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+/**
+ * Map technical error messages to user-friendly descriptions
+ */
+function mapErrorMessage(error = '') {
+  const lower = error.toLowerCase();
+  if (lower.includes('401') || lower.includes('session fetch failed')) {
+    return 'Please log in and try again';
+  }
+  if (lower.includes('no access token') || lower.includes('auth')) {
+    return 'Authentication required - refresh the page';
+  }
+  if (lower.includes('403')) {
+    return 'Access denied - check your account';
+  }
+  if (lower.includes('429') || lower.includes('rate limit')) {
+    return 'Rate limited - try again shortly';
+  }
+  if (lower.includes('500') || lower.includes('server')) {
+    return 'Server error - try again later';
+  }
+  if (lower.includes('fetch failed') || lower.includes('network')) {
+    return 'Network error - check connection';
+  }
+  if (lower.includes('no conversation id')) {
+    return 'Open a conversation first';
+  }
+  if (lower.includes('unsupported')) {
+    return 'This page is not supported';
+  }
+  // Return original if no mapping found (truncated)
+  return error.length > 50 ? error.slice(0, 47) + '...' : error;
+}
+
 function isNoConversationError(errorText = '') {
   const lower = errorText.toLowerCase();
   return (
@@ -1069,8 +1164,55 @@ function isNoConversationError(errorText = '') {
     lower.includes('receiving end does not exist') ||
     lower.includes('establish connection') ||
     lower.includes('cannot access contents') ||
-    lower.includes('chatgpt conversation')
+    lower.includes('chatgpt conversation') ||
+    lower.includes('open a conversation')
   );
+}
+
+/**
+ * Update an existing node element in-place (avoids DOM destruction)
+ */
+function _updateNodeElement(el, node) {
+  // Update text preview
+  const preview = el.querySelector('.card-preview, .message-preview');
+  if (preview) {
+    const newText = truncate(node.text);
+    if (preview.textContent !== newText) {
+      preview.textContent = newText;
+    }
+  }
+
+  // Update version tag
+  const versionTag = el.querySelector('.card-version-tag');
+  if (node.hasEditVersions && node.totalVersions > 1) {
+    const vText = `v${node.editVersionIndex}/${node.totalVersions}`;
+    if (versionTag) {
+      if (versionTag.textContent !== vText) {
+        versionTag.textContent = vText;
+      }
+    }
+  }
+
+  // Update timestamp
+  const timeEl = el.querySelector('.card-time');
+  if (timeEl) {
+    const newTime = formatTimestamp(node.createTime);
+    if (timeEl.textContent !== newTime) {
+      timeEl.textContent = newTime;
+    }
+  }
+
+  // Update node data in map
+  nodeDataMap.set(node.id, {
+    id: node.id,
+    type: node.type,
+    targetConversationId: node.targetConversationId,
+    hasEditVersions: node.hasEditVersions,
+    editVersionIndex: node.editVersionIndex,
+    totalVersions: node.totalVersions,
+    siblingIds: node.siblingIds,
+    branchNodeId: node.branchNodeId
+  });
 }
 
 function renderTree(nodes, title, hasAncestry = false) {
@@ -1085,9 +1227,14 @@ function renderTree(nodes, title, hasAncestry = false) {
   nodeDataMap.clear();
   treeRoot.innerHTML = '';
 
-  // Filter out nodes with empty text (keep branches, branchRoots, and title types)
+  // Filter out nodes with empty text (keep branches, editBranches, branchRoots, and title types)
   const filteredNodes = (nodes || []).filter((node) => {
-    if (node.type === 'branch' || node.type === 'branchRoot') return true;
+    if (
+      node.type === 'branch' ||
+      node.type === 'branchRoot' ||
+      node.type === 'editBranch'
+    )
+      return true;
     if (
       node.type === 'title' ||
       node.type === 'ancestor-title' ||
@@ -1186,70 +1333,82 @@ function renderTree(nodes, title, hasAncestry = false) {
 /**
  * Draw small backbone segments only across vertical gaps between nodes of the same depth.
  * Keeps the existing node connectors untouched and only fills missing segments.
+ * Uses requestAnimationFrame to batch reads and writes for performance.
  */
+let backboneRafId = null;
+
 function drawBackbones() {
-  // Remove existing backbones
-  treeRoot.querySelectorAll('.tree-backbone').forEach((el) => el.remove());
+  // Cancel any pending backbone draw
+  if (backboneRafId) {
+    cancelAnimationFrame(backboneRafId);
+  }
 
-  const nodes = Array.from(treeRoot.querySelectorAll('.tree-node'));
-  if (nodes.length === 0) return;
+  backboneRafId = requestAnimationFrame(() => {
+    backboneRafId = null;
 
-  const railSize = 20; // matches --rail-size
+    // Remove existing backbones
+    treeRoot.querySelectorAll('.tree-backbone').forEach((el) => el.remove());
 
-  // Group nodes by depth with their rects/colors
-  const nodesByDepth = new Map();
-  nodes.forEach((node) => {
-    const type = node.dataset.type || '';
-    const depth = parseInt(node.dataset.depth || '0', 10);
-    const top = node.offsetTop;
-    const bottom = top + node.offsetHeight;
-    const entry = nodesByDepth.get(depth) || [];
-    const color = node.dataset.color?.trim() || '';
-    entry.push({
+    const nodes = Array.from(treeRoot.querySelectorAll('.tree-node'));
+    if (nodes.length === 0) return;
+
+    const railSize = 20; // matches --rail-size
+
+    // Batch read: collect all measurements first
+    const measurements = nodes.map((node) => ({
       node,
-      top,
-      bottom,
-      color,
-      type
-    });
-    nodesByDepth.set(depth, entry);
-  });
+      type: node.dataset.type || '',
+      depth: parseInt(node.dataset.depth || '0', 10),
+      top: node.offsetTop,
+      bottom: node.offsetTop + node.offsetHeight,
+      color: node.dataset.color?.trim() || '',
+      isExpanded: node.classList.contains('is-expanded')
+    }));
 
-  nodesByDepth.forEach((list, depth) => {
-    // Sort by vertical position
-    list.sort((a, b) => a.top - b.top);
-    let lastColor = null;
-    for (let i = 0; i < list.length - 1; i++) {
-      const current = list[i];
-      const next = list[i + 1];
-      const inheritedColor = current.color || lastColor || getColor(depth);
-      lastColor = inheritedColor;
-      const gap = next.top - current.bottom;
-
-      // Only fill meaningful gaps (skip near-adjacent nodes)
-      if (gap <= 4) continue;
-
-      // Do not extend a backbone from a collapsed branch; its chain is folded
-      if (
-        current.type === 'branch' &&
-        !current.node.classList.contains('is-expanded')
-      ) {
-        continue;
-      }
-
-      const backbone = document.createElement('div');
-      backbone.className = 'tree-backbone';
-
-      backbone.style.background = inheritedColor;
-
-      backbone.style.left = `${depth * railSize + railSize / 2 - 1}px`;
-      // Overlap both ends to ensure connection into adjoining connectors
-      const top = current.bottom - 6;
-      const height = gap + 30;
-      backbone.style.top = `${top}px`;
-      backbone.style.height = `${height}px`;
-      treeRoot.appendChild(backbone);
+    // Group by depth
+    const nodesByDepth = new Map();
+    for (const m of measurements) {
+      const entry = nodesByDepth.get(m.depth) || [];
+      entry.push(m);
+      nodesByDepth.set(m.depth, entry);
     }
+
+    // Batch write: create all backbone elements
+    const fragment = document.createDocumentFragment();
+
+    nodesByDepth.forEach((list, depth) => {
+      list.sort((a, b) => a.top - b.top);
+      let lastColor = null;
+      for (let i = 0; i < list.length - 1; i++) {
+        const current = list[i];
+        const next = list[i + 1];
+        const inheritedColor = current.color || lastColor || getColor(depth);
+        lastColor = inheritedColor;
+        const gap = next.top - current.bottom;
+
+        if (gap <= 4) continue;
+
+        // Do not extend from collapsed branches or edit branches
+        if (
+          (current.type === 'branch' && !current.isExpanded) ||
+          current.type === 'editBranch'
+        ) {
+          continue;
+        }
+
+        const backbone = document.createElement('div');
+        backbone.className = 'tree-backbone';
+        backbone.style.background = inheritedColor;
+        backbone.style.left = `${depth * railSize + railSize / 2 - 1}px`;
+        const topPos = current.bottom - 6;
+        const height = gap + 30;
+        backbone.style.top = `${topPos}px`;
+        backbone.style.height = `${height}px`;
+        fragment.appendChild(backbone);
+      }
+    });
+
+    treeRoot.appendChild(fragment);
   });
 }
 
@@ -1341,7 +1500,13 @@ async function focusMessageInTab(tabId, nodeId, attempts = 6) {
 async function handleNodeClick(node) {
   if (!activeTabId) return;
 
-  const { id, type, targetConversationId } = node;
+  const { id, type, targetConversationId, branchNodeId } = node;
+
+  // Ignore clicks on pre-branch indicator (informational only)
+  if (type === 'preBranchIndicator') {
+    return;
+  }
+
   const destinationConversationId =
     targetConversationId || currentConversationId;
 
@@ -1355,6 +1520,21 @@ async function handleNodeClick(node) {
   })();
 
   try {
+    // Handle edit branch clicks - switch ChatGPT to that branch
+    if (type === 'editBranch' && branchNodeId) {
+      setStatus('Switching branch...', 'loading');
+      const resp = await tabsSendMessageSafe(activeTabId, {
+        type: 'SWITCH_CHATGPT_BRANCH',
+        branchNodeId
+      });
+      if (resp?.ok) {
+        setStatus('Branch switched', 'success');
+      } else {
+        setStatus(resp?.error || 'Switch failed');
+      }
+      return;
+    }
+
     // Navigate to conversation for branches, branchRoots, or ancestor titles with targetConversationId
     const isNavigableType =
       type === 'branch' ||
@@ -1408,7 +1588,9 @@ async function fetchTree(tab = null) {
   }
 
   if (!isChatUrl(targetTab.url)) {
-    return { error: 'Open a ChatGPT conversation' };
+    return {
+      error: 'Open a conversation in ChatGPT, Claude, Gemini, or Perplexity'
+    };
   }
 
   try {
@@ -1447,14 +1629,8 @@ async function refresh() {
   }
 
   if (!isChatUrl(tab.url)) {
-    currentConversationId = null;
-    updatePlatformIndicator(null);
-    showNoConversationGuidance(
-      'Visit ChatGPT, Claude, Gemini, or Perplexity and open a conversation, then press Refresh.'
-    );
-    setStatus('Waiting for chat');
-    refreshBtn.disabled = false;
-    isRefreshing = false;
+    // Auto-close panel on non-supported pages
+    window.close();
     return;
   }
 
@@ -1476,7 +1652,9 @@ async function refresh() {
       );
       setStatus('Waiting for chat');
     } else {
-      setStatus(data.error);
+      // Map technical errors to user-friendly messages
+      const friendlyError = mapErrorMessage(data.error);
+      setStatus(friendlyError);
     }
     refreshBtn.disabled = false;
     isRefreshing = false;
@@ -1509,6 +1687,96 @@ function debouncedRefresh() {
       refresh();
     }
   }, 300);
+}
+
+// ============================================
+// Search & Keyboard Navigation
+// ============================================
+
+const searchInput = document.getElementById('search-input');
+let searchDebounceTimer = null;
+
+function applySearchFilter() {
+  const nodes = treeRoot.querySelectorAll('.tree-node');
+  let matchCount = 0;
+  const query = currentSearchQuery;
+
+  nodes.forEach((node) => {
+    const text = (node.dataset.fullText || '').toLowerCase();
+    const nodeType = node.dataset.type || '';
+    // Always show title and branch nodes
+    const isStructural =
+      nodeType === 'title' ||
+      nodeType === 'ancestor-title' ||
+      nodeType === 'current-title';
+    const matches = !query || isStructural || text.includes(query);
+    node.classList.toggle('search-hidden', !matches);
+    if (matches && !isStructural) matchCount++;
+  });
+
+  if (query) {
+    setStatus(`${matchCount} match${matchCount !== 1 ? 'es' : ''}`);
+  }
+}
+
+function setupSearch() {
+  if (!searchInput) return;
+
+  searchInput.addEventListener('input', () => {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      currentSearchQuery = (searchInput.value || '').trim().toLowerCase();
+      applySearchFilter();
+    }, 200);
+  });
+
+  // Clear search on Escape
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      searchInput.value = '';
+      currentSearchQuery = '';
+      applySearchFilter();
+      searchInput.blur();
+    }
+  });
+}
+
+function setupKeyboardNavigation() {
+  // "/" key focuses search
+  document.addEventListener('keydown', (e) => {
+    if (
+      e.key === '/' &&
+      document.activeElement !== searchInput &&
+      !e.ctrlKey &&
+      !e.metaKey
+    ) {
+      e.preventDefault();
+      searchInput?.focus();
+      return;
+    }
+  });
+
+  // Arrow key navigation in tree
+  treeRoot.addEventListener('keydown', (e) => {
+    const focused = document.activeElement;
+    if (!focused?.classList.contains('tree-node')) return;
+
+    const visibleNodes = Array.from(
+      treeRoot.querySelectorAll('.tree-node:not(.search-hidden)')
+    );
+    const idx = visibleNodes.indexOf(focused);
+
+    if (e.key === 'ArrowDown' && idx < visibleNodes.length - 1) {
+      e.preventDefault();
+      visibleNodes[idx + 1].focus();
+    } else if (e.key === 'ArrowUp' && idx > 0) {
+      e.preventDefault();
+      visibleNodes[idx - 1].focus();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      focused.click();
+    }
+  });
 }
 
 // ============================================
@@ -1606,7 +1874,9 @@ function setupGlobalListeners() {
 
       // Update button state to show loading
       exportMdBtn.disabled = true;
-      exportMdBtn.textContent = 'Exporting...';
+      exportMdBtn.classList.add('is-loading');
+      exportMdBtn.innerHTML = '<span class="header-spinner"></span>';
+      exportMdBtn.title = 'Exporting...';
       setStatus('Exporting...', 'loading');
 
       try {
@@ -1627,12 +1897,9 @@ function setupGlobalListeners() {
         setStatus('Export failed');
       } finally {
         exportMdBtn.disabled = false;
-        exportMdBtn.innerHTML = `
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-          </svg>
-          Export as Markdown
-        `;
+        exportMdBtn.classList.remove('is-loading');
+        exportMdBtn.innerHTML = exportMdBtnIdleMarkup;
+        exportMdBtn.title = 'Export Markdown';
       }
     });
   }
@@ -1683,6 +1950,10 @@ function setupGlobalListeners() {
 
   // Setup settings listeners
   setupSettingsListeners();
+
+  // Setup search and keyboard navigation
+  setupSearch();
+  setupKeyboardNavigation();
 }
 
 // Initialize

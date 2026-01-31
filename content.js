@@ -38,6 +38,7 @@
   const TOKEN_TTL_MS = 5 * 60 * 1000;
 
   const memoryCache = new Map();
+  const MAX_CACHE_SIZE = 50;
   let cachedToken = null;
   let tokenExpiry = 0;
 
@@ -71,9 +72,12 @@
    * @param {string} platform - Platform identifier
    * @returns {Object|null} - Cached conversation data or null
    */
-  function getRawCache(platform) {
+  function getRawCache(platform, conversationId = null) {
     const cached = rawConversationCache[platform];
     if (!cached) return null;
+    if (conversationId && cached.conversationId !== conversationId) {
+      return null;
+    }
     // Cache is valid for 10 minutes for export purposes
     const EXPORT_CACHE_TTL_MS = 10 * 60 * 1000;
     if (Date.now() - cached.lastUpdate > EXPORT_CACHE_TTL_MS) {
@@ -214,6 +218,13 @@
   async function setCachedConversation(conversationId, data) {
     const cacheEntry = { data, timestamp: Date.now() };
     memoryCache.set(conversationId, cacheEntry);
+
+    // LRU eviction: remove oldest entries if over limit
+    if (memoryCache.size > MAX_CACHE_SIZE) {
+      const oldest = memoryCache.keys().next().value;
+      memoryCache.delete(oldest);
+    }
+
     const key = `${CONV_CACHE_PREFIX}${conversationId}`;
     try {
       await chrome.storage.local.set({ [key]: cacheEntry });
@@ -317,15 +328,58 @@
     return ts > 1e12 ? ts / 1000 : ts;
   }
 
+  function normalizeContent(content) {
+    if (!content) return '';
+    if (typeof content === 'string') return content.trim();
+
+    if (Array.isArray(content)) {
+      const parts = content
+        .map((part) => {
+          if (typeof part === 'string') return part;
+          if (typeof part?.text === 'string') return part.text;
+          if (typeof part?.content === 'string') return part.content;
+          if (Array.isArray(part?.parts)) {
+            return part.parts
+              .map((subPart) => {
+                if (typeof subPart === 'string') return subPart;
+                if (typeof subPart?.text === 'string') return subPart.text;
+                if (typeof subPart?.content === 'string')
+                  return subPart.content;
+                return '';
+              })
+              .filter(Boolean)
+              .join('\n');
+          }
+          return '';
+        })
+        .filter(Boolean);
+      return parts.join('\n').trim();
+    }
+
+    if (Array.isArray(content.parts)) {
+      const parts = content.parts
+        .map((part) => {
+          if (typeof part === 'string') return part;
+          if (typeof part?.text === 'string') return part.text;
+          if (typeof part?.content === 'string') return part.content;
+          return '';
+        })
+        .filter(Boolean);
+      return parts.join('\n').trim();
+    }
+
+    if (typeof content.text === 'string') return content.text.trim();
+    if (typeof content.content === 'string') return content.content.trim();
+    return '';
+  }
+
   function extractText(message) {
     if (!message) return '';
-    if (Array.isArray(message.content?.parts)) {
-      return message.content.parts.join('\n').trim();
-    }
-    if (typeof message.content === 'string') {
-      return message.content.trim();
-    }
-    return message.content?.text?.trim() || message.text?.trim() || '';
+    const contentText = normalizeContent(message.content);
+    if (contentText) return contentText;
+    const text = normalizeContent(message.text);
+    if (text) return text;
+    return '';
   }
 
   function isInternalMessage(text) {
@@ -356,9 +410,46 @@
   }
 
   /**
-   * Extract messages from ChatGPT with edit version info
+   * Count descendants of a node in the mapping tree
    */
-  function extractChatGPTMessages(mapping, currentNode) {
+  function countDescendants(nodeId, childrenMap, mapping) {
+    let count = 0;
+    const stack = [nodeId];
+    while (stack.length > 0) {
+      const id = stack.pop();
+      const children = childrenMap[id] || [];
+      for (const childId of children) {
+        const msg = mapping[childId]?.message;
+        if (
+          msg &&
+          (msg.author?.role === 'user' || msg.author?.role === 'assistant')
+        ) {
+          count++;
+        }
+        stack.push(childId);
+      }
+    }
+    return count;
+  }
+
+  /**
+   * Find the leaf node of a branch subtree (for switching)
+   */
+  function findBranchLeaf(nodeId, childrenMap) {
+    let current = nodeId;
+    while (true) {
+      const children = childrenMap[current] || [];
+      if (children.length === 0) return current;
+      // Follow the last child (most recent path)
+      current = children[children.length - 1];
+    }
+  }
+
+  /**
+   * Extract ChatGPT conversation as a tree with edit branches.
+   * Walks the current path and emits editBranch nodes for siblings.
+   */
+  function extractChatGPTTree(mapping, currentNode) {
     if (!mapping) return [];
 
     // Build parent->children map
@@ -395,39 +486,60 @@
       if (isInternalMessage(text)) continue;
 
       // Check for siblings (edit versions)
-      const parentId = parentMap[nodeId];
-      const siblings = parentId ? childrenMap[parentId] || [] : [];
-      const hasSiblings = siblings.length > 1;
+      const parent = parentMap[nodeId];
+      const siblings = parent ? childrenMap[parent] || [] : [];
+      const sortedSiblings = siblings
+        .map((id) => ({
+          id,
+          createTime: mapping[id]?.message?.create_time || 0
+        }))
+        .sort((a, b) => a.createTime - b.createTime);
 
-      let editVersionIndex = 1;
-      let totalVersions = 1;
-      let siblingIds = null;
+      const hasSiblings = sortedSiblings.length > 1;
+      const editVersionIndex = hasSiblings
+        ? sortedSiblings.findIndex((s) => s.id === nodeId) + 1
+        : 1;
 
-      if (hasSiblings) {
-        const sortedSiblings = siblings
-          .map((id) => ({
-            id,
-            createTime: mapping[id]?.message?.create_time || 0
-          }))
-          .sort((a, b) => a.createTime - b.createTime);
-
-        siblingIds = sortedSiblings.map((s) => s.id);
-        totalVersions = sortedSiblings.length;
-        editVersionIndex = sortedSiblings.findIndex((s) => s.id === nodeId) + 1;
-      }
-
+      // Emit the current-path message
       messages.push({
         id: nodeId,
         type: 'message',
         role,
         text,
         createTime: toSeconds(msg.create_time || 0),
-        parentId,
+        parentId: parent,
         hasEditVersions: hasSiblings,
         editVersionIndex: hasSiblings ? editVersionIndex : undefined,
-        totalVersions: hasSiblings ? totalVersions : undefined,
-        siblingIds: hasSiblings ? siblingIds : undefined
+        totalVersions: hasSiblings ? sortedSiblings.length : undefined,
+        siblingIds: hasSiblings ? sortedSiblings.map((s) => s.id) : undefined
       });
+
+      // Emit edit branch nodes for non-current siblings
+      if (hasSiblings) {
+        for (const sib of sortedSiblings) {
+          if (sib.id === nodeId) continue;
+          const sibEntry = mapping[sib.id];
+          const sibMsg = sibEntry?.message;
+          const sibText = sibMsg ? extractText(sibMsg) : '';
+          const sibRole = sibMsg?.author?.role;
+          if (!sibText || !sibText.trim()) continue;
+
+          const sibIndex = sortedSiblings.findIndex((s) => s.id === sib.id) + 1;
+
+          messages.push({
+            id: `edit-branch:${sib.id}`,
+            type: 'editBranch',
+            role: sibRole,
+            text: sibText,
+            createTime: toSeconds(sib.createTime || 0),
+            depth: 1,
+            branchNodeId: sib.id,
+            editVersionLabel: `Edit v${sibIndex}/${sortedSiblings.length}`,
+            descendantCount: countDescendants(sib.id, childrenMap, mapping),
+            icon: 'edit' // Icon type for visual distinction
+          });
+        }
+      }
     }
 
     return messages;
@@ -480,9 +592,105 @@
 
   // Cache for Claude API data (from fetch interception)
   let claudeApiCache = {
+    conversationId: null,
     messages: [],
     lastUpdate: 0
   };
+
+  let claudeOrgId = null;
+  const CLAUDE_ORG_ID_REGEX = /^[a-f0-9-]{36}$/i;
+
+  function extractClaudeConversationIdFromUrl(url) {
+    if (!url) return null;
+    const match = url.match(/chat_conversations\/([a-zA-Z0-9-]+)/i);
+    return match?.[1] || null;
+  }
+
+  function extractClaudeOrgIdFromUrl(url) {
+    if (!url) return null;
+    const match = url.match(/organizations\/([a-zA-Z0-9-]+)/i);
+    const orgId = match?.[1] || null;
+    if (!orgId) return null;
+    return CLAUDE_ORG_ID_REGEX.test(orgId) ? orgId : null;
+  }
+
+  function extractClaudeOrgIdFromStorage(storage) {
+    if (!storage) return null;
+    const keys = Object.keys(storage);
+    for (const key of keys) {
+      if (!key.toLowerCase().includes('org')) continue;
+      const value = storage.getItem(key);
+      if (!value) continue;
+      if (CLAUDE_ORG_ID_REGEX.test(value)) return value;
+      try {
+        const parsed = JSON.parse(value);
+        if (typeof parsed === 'string' && CLAUDE_ORG_ID_REGEX.test(parsed)) {
+          return parsed;
+        }
+        if (parsed && typeof parsed === 'object') {
+          for (const candidate of Object.values(parsed)) {
+            if (
+              typeof candidate === 'string' &&
+              CLAUDE_ORG_ID_REGEX.test(candidate)
+            ) {
+              return candidate;
+            }
+          }
+        }
+      } catch {
+        // Ignore JSON parse errors
+      }
+    }
+    return null;
+  }
+
+  function extractClaudeOrgIdFromWindow() {
+    const pageProps = window.__NEXT_DATA__?.props?.pageProps;
+    const candidates = [
+      pageProps?.organization?.uuid,
+      pageProps?.organization_uuid,
+      pageProps?.currentOrganization?.uuid,
+      pageProps?.user?.organization?.uuid,
+      pageProps?.user?.organization_uuid
+    ];
+
+    for (const candidate of candidates) {
+      if (
+        typeof candidate === 'string' &&
+        CLAUDE_ORG_ID_REGEX.test(candidate)
+      ) {
+        return candidate;
+      }
+    }
+
+    return (
+      extractClaudeOrgIdFromStorage(localStorage) ||
+      extractClaudeOrgIdFromStorage(sessionStorage)
+    );
+  }
+
+  function extractClaudeOrgIdFromPerformance() {
+    try {
+      const entries = performance.getEntriesByType('resource') || [];
+      for (const entry of entries) {
+        const orgId = extractClaudeOrgIdFromUrl(entry.name);
+        if (orgId) return orgId;
+      }
+    } catch {
+      // Ignore performance access errors
+    }
+    return null;
+  }
+
+  function getClaudeOrgId() {
+    if (claudeOrgId) return claudeOrgId;
+    const orgId =
+      extractClaudeOrgIdFromWindow() || extractClaudeOrgIdFromPerformance();
+    if (orgId) {
+      claudeOrgId = orgId;
+    }
+    return claudeOrgId;
+  }
 
   /**
    * Inject fetch interceptor to capture Claude API responses
@@ -529,70 +737,155 @@
     script.remove();
   }
 
+  function extractClaudeMessagesFromApi(data) {
+    if (!data) {
+      return { messages: [], conversationId: null, title: null };
+    }
+
+    let extractedMessages = [];
+    const conversationId = data.uuid || null;
+    const title = data.name || null;
+
+    const sourceMessages = Array.isArray(data.chat_messages)
+      ? data.chat_messages
+      : Array.isArray(data.messages)
+        ? data.messages
+        : [];
+
+    if (sourceMessages.length > 0) {
+      // Group messages by parent_message_uuid to detect edits
+      const parentGroups = new Map();
+
+      const mapped = sourceMessages
+        .map((msg, idx) => {
+          const contentText = normalizeContent(msg.text ?? msg.content);
+          const parentMsgId = msg.parent_message_uuid || msg.parent || null;
+          return {
+            id: msg.uuid || msg.id || `claude-api-${idx}`,
+            role:
+              msg.sender === 'human' || msg.role === 'user'
+                ? 'user'
+                : 'assistant',
+            content: contentText,
+            text: contentText,
+            createTime: msg.created_at
+              ? new Date(msg.created_at).getTime() / 1000
+              : Date.now() / 1000,
+            parentMsgId,
+            index: msg.index ?? idx
+          };
+        })
+        .filter((msg) => msg.content && msg.content.trim().length > 0);
+
+      // Build parent groups for edit detection
+      for (const msg of mapped) {
+        if (msg.parentMsgId) {
+          const group = parentGroups.get(msg.parentMsgId) || [];
+          group.push(msg);
+          parentGroups.set(msg.parentMsgId, group);
+        }
+      }
+
+      // Mark edit versions for messages sharing a parent
+      for (const msg of mapped) {
+        const siblings = msg.parentMsgId
+          ? parentGroups.get(msg.parentMsgId) || []
+          : [];
+        // Only mark as edits if siblings share the same role
+        const sameRoleSiblings = siblings.filter((s) => s.role === msg.role);
+
+        if (sameRoleSiblings.length > 1) {
+          sameRoleSiblings.sort((a, b) => a.createTime - b.createTime);
+          const versionIndex =
+            sameRoleSiblings.findIndex((s) => s.id === msg.id) + 1;
+
+          msg.hasEditVersions = true;
+          msg.editVersionIndex = versionIndex;
+          msg.totalVersions = sameRoleSiblings.length;
+          msg.siblingIds = sameRoleSiblings.map((s) => s.id);
+        }
+      }
+
+      extractedMessages = mapped;
+    }
+
+    return { messages: extractedMessages, conversationId, title };
+  }
+
+  async function fetchClaudeConversation(conversationId) {
+    const orgId = getClaudeOrgId();
+    if (!orgId) {
+      throw new Error('No Claude organization ID available');
+    }
+
+    const url = `${location.origin}/api/organizations/${orgId}/chat_conversations/${conversationId}`;
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) {
+      throw new Error(`Claude conversation fetch failed: ${res.status}`);
+    }
+
+    const data = await res.json();
+    const extracted = extractClaudeMessagesFromApi(data);
+    const resolvedConversationId =
+      extracted.conversationId || conversationId || null;
+
+    if (extracted.messages.length > 0) {
+      claudeApiCache = {
+        conversationId: resolvedConversationId,
+        messages: extracted.messages,
+        lastUpdate: Date.now()
+      };
+
+      updateRawCache('claude', {
+        conversationId: resolvedConversationId,
+        title:
+          extracted.title ||
+          document.title?.replace(/\s*[-–]\s*Claude\s*$/i, '').trim() ||
+          'Claude Conversation',
+        messages: extracted.messages
+      });
+    }
+
+    return {
+      conversationId: resolvedConversationId,
+      title: extracted.title,
+      messages: extracted.messages
+    };
+  }
+
   /**
    * Handle Claude API response data from fetch interceptor
    */
   function handleClaudeApiResponse(data, url) {
     if (!data) return;
 
-    // Extract messages from various API response formats
-    let extractedMessages = [];
-    let conversationId = null;
-    let title = null;
-
-    // Try to extract conversation ID from URL or data
-    if (url) {
-      const match = url.match(/chat_conversations\/([a-zA-Z0-9-]+)/);
-      if (match) conversationId = match[1];
-    }
-    if (data.uuid) conversationId = data.uuid;
-    if (data.name) title = data.name;
-
-    // Format 1: Direct conversation data with chat_messages
-    if (data.chat_messages && Array.isArray(data.chat_messages)) {
-      extractedMessages = data.chat_messages
-        .map((msg, idx) => ({
-          id: msg.uuid || `claude-api-${idx}`,
-          role: msg.sender === 'human' ? 'user' : 'assistant',
-          content: msg.text || '', // Keep as 'content' for raw cache
-          text: msg.text || '',
-          createTime: new Date(msg.created_at || Date.now()).getTime() / 1000
-        }))
-        .filter((m) => m.content && m.content.length >= MIN_MESSAGE_LENGTH);
+    const orgId = extractClaudeOrgIdFromUrl(url);
+    if (orgId) {
+      claudeOrgId = orgId;
     }
 
-    // Format 2: Messages array directly
-    if (data.messages && Array.isArray(data.messages)) {
-      extractedMessages = data.messages
-        .map((msg, idx) => ({
-          id: msg.id || msg.uuid || `claude-api-${idx}`,
-          role:
-            msg.role === 'user' || msg.sender === 'human'
-              ? 'user'
-              : 'assistant',
-          content: msg.content || msg.text || '',
-          text: msg.content || msg.text || '',
-          createTime: msg.created_at
-            ? new Date(msg.created_at).getTime() / 1000
-            : Date.now() / 1000
-        }))
-        .filter((m) => m.content && m.content.length >= MIN_MESSAGE_LENGTH);
-    }
+    const extracted = extractClaudeMessagesFromApi(data);
+    const conversationId =
+      extracted.conversationId ||
+      extractClaudeConversationIdFromUrl(url) ||
+      getConversationId('claude');
+    const title = extracted.title || null;
 
-    if (extractedMessages.length > 0) {
+    if (extracted.messages.length > 0) {
       claudeApiCache = {
-        messages: extractedMessages,
+        conversationId,
+        messages: extracted.messages,
         lastUpdate: Date.now()
       };
 
       // Also update the raw conversation cache for Markdown export
       updateRawCache('claude', {
-        conversationId: conversationId || getConversationId('claude'),
+        conversationId,
         title:
           title ||
           document.title?.replace(/\s*[-–]\s*Claude\s*$/i, '').trim() ||
           'Claude Conversation',
-        messages: extractedMessages
+        messages: extracted.messages
       });
 
       // Trigger a refresh
@@ -709,6 +1002,19 @@
           text: obj.text,
           createTime: Date.now() / 1000
         });
+      } else if (Array.isArray(obj.parts)) {
+        const partsText = normalizeContent(obj.parts);
+        if (partsText.length > 10) {
+          const role =
+            obj.author === 'user' || obj.role === 'user' ? 'user' : 'assistant';
+          messages.push({
+            id: obj.id || `gemini-api-${messages.length}`,
+            role,
+            content: partsText,
+            text: partsText,
+            createTime: Date.now() / 1000
+          });
+        }
       }
 
       // Recursively search arrays and objects
@@ -1041,10 +1347,11 @@
    * Extract Claude messages with improved selectors and streaming awareness
    * Only extracts completed messages (data-is-streaming="false")
    */
-  function extractClaudeMessages() {
+  function extractClaudeMessages(minLength = MIN_MESSAGE_LENGTH) {
     const messages = [];
     const seenTexts = new Set();
     let index = 0;
+    const conversationId = getConversationId('claude');
 
     // Clear previous tags
     document.querySelectorAll('[data-branch-tree-id]').forEach((el) => {
@@ -1054,6 +1361,7 @@
     // Strategy 1: Use API cache if available and recent (within 30 seconds)
     if (
       claudeApiCache.messages.length > 0 &&
+      claudeApiCache.conversationId === conversationId &&
       Date.now() - claudeApiCache.lastUpdate < 30000
     ) {
       // Use API data as authoritative source
@@ -1182,7 +1490,7 @@
         if (role !== 'user' && role !== 'assistant') continue;
 
         const text = el.textContent?.trim() || '';
-        if (!text || text.length < MIN_MESSAGE_LENGTH) continue;
+        if (!text || text.length < minLength) continue;
 
         const textKey = text.slice(0, 150).toLowerCase().replace(/\s+/g, ' ');
         if (seenTexts.has(textKey)) continue;
@@ -1333,8 +1641,12 @@
     const result = [];
     const branches = branchData?.branches?.[conversationId] || [];
 
+    // Separate edit branch nodes from regular messages
+    const editBranches = messages.filter((m) => m.type === 'editBranch');
+    const regularMessages = messages.filter((m) => m.type !== 'editBranch');
+
     // Filter to user messages for display
-    const userMessages = messages.filter((m) => m.role === 'user');
+    const userMessages = regularMessages.filter((m) => m.role === 'user');
 
     // Add title node
     if (title) {
@@ -1347,7 +1659,7 @@
       });
     }
 
-    // Create branch nodes
+    // Create external branch nodes
     const branchNodes = branches.map((branch, idx) => ({
       id: `branch:${branch.childId}`,
       type: 'branch',
@@ -1355,11 +1667,13 @@
       createTime: toSeconds(branch.createdAt || 0),
       targetConversationId: branch.childId,
       branchIndex: idx,
-      depth: 1
+      branchLabel: `Branch: ${branch.title || 'New Chat'}`,
+      depth: 1,
+      icon: 'branch' // Icon type for visual distinction
     }));
 
-    // Combine and sort by time
-    const allItems = [...userMessages, ...branchNodes].sort(
+    // Combine user messages + external branches + edit branches
+    const allItems = [...userMessages, ...branchNodes, ...editBranches].sort(
       (a, b) => toSeconds(a.createTime) - toSeconds(b.createTime)
     );
 
@@ -1367,6 +1681,11 @@
     for (const item of allItems) {
       if (item.type === 'branch') {
         result.push({ ...item, depth: 1 });
+      } else if (item.type === 'editBranch') {
+        result.push({
+          ...item,
+          targetConversationId: conversationId
+        });
       } else {
         result.push({
           ...item,
@@ -1390,7 +1709,8 @@
 
     switch (platform) {
       case 'chatgpt': {
-        const chatgptMatch = pathname.match(/\/c\/([0-9a-f-]+)/i);
+        // Match both regular IDs and WEB: prefixed pre-branch IDs
+        const chatgptMatch = pathname.match(/\/c\/((?:WEB:)?[0-9a-f-]+)/i);
         return chatgptMatch?.[1] || null;
       }
 
@@ -1422,17 +1742,47 @@
 
   let pendingBranch = null;
 
+  /**
+   * Detect if a click target is a "Branch in new chat" button.
+   * Uses multiple heuristics for resilience against UI changes.
+   */
+  function isBranchButton(target) {
+    if (!target) return false;
+
+    // Check text content (case-insensitive, partial match)
+    const text = (target.textContent || '').trim().toLowerCase();
+    if (text.includes('branch')) return true;
+
+    // Check aria-label
+    const ariaLabel = (target.getAttribute('aria-label') || '').toLowerCase();
+    if (ariaLabel.includes('branch')) return true;
+
+    // Check data-testid
+    const testId = target.dataset?.testid || '';
+    if (testId.includes('branch')) return true;
+
+    // Check closest parent with branch indicators
+    const branchParent = target.closest(
+      '[data-testid*="branch"], [aria-label*="branch" i]'
+    );
+    if (branchParent) return true;
+
+    return false;
+  }
+
   document.addEventListener(
     'click',
     (e) => {
-      const text = e.target?.textContent?.trim();
-      if (text === 'Branch in new chat') {
+      if (isBranchButton(e.target)) {
         const platform = detectPlatform();
         if (platform === 'chatgpt') {
           const convId = getConversationId(platform);
           if (convId) {
             const timestampSeconds = Math.floor(Date.now() / 1000);
-            pendingBranch = { parentId: convId, timestamp: timestampSeconds };
+            pendingBranch = {
+              parentId: convId,
+              timestamp: timestampSeconds
+            };
             chrome.storage.local.set({ pendingBranch });
           }
         }
@@ -1440,6 +1790,28 @@
     },
     true
   );
+
+  // URL change detection for branch creation backup
+  let lastContentUrl = location.href;
+
+  function checkUrlChange() {
+    const currentUrl = location.href;
+    if (currentUrl !== lastContentUrl) {
+      const platform = detectPlatform();
+      if (platform === 'chatgpt') {
+        const oldMatch = lastContentUrl.match(/\/c\/([0-9a-f-]+)/i);
+        const newMatch = currentUrl.match(/\/c\/([0-9a-f-]+)/i);
+        if (oldMatch?.[1] && newMatch?.[1] && oldMatch[1] !== newMatch[1]) {
+          // Navigation to a different conversation - check pending
+          scheduleRefresh(300);
+        }
+      }
+      lastContentUrl = currentUrl;
+    }
+  }
+
+  // Poll for URL changes (pushState doesn't fire events)
+  setInterval(checkUrlChange, 1000);
 
   async function checkPendingBranch(
     currentConvId,
@@ -1604,8 +1976,8 @@
           branchData = updatedData;
         }
 
-        // Extract messages with edit version info
-        messages = extractChatGPTMessages(conv.mapping, conv.current_node);
+        // Extract messages as tree with edit branches
+        messages = extractChatGPTTree(conv.mapping, conv.current_node);
       } else {
         // Use DOM for other platforms
         messages = extractDOMMessages(platform);
@@ -1680,6 +2052,10 @@
     // Handle Claude API completion notification from background script
     if (msg?.type === 'CLAUDE_API_COMPLETED') {
       // Background script detected Claude API request completed
+      const orgId = extractClaudeOrgIdFromUrl(msg.url);
+      if (orgId) {
+        claudeOrgId = orgId;
+      }
       // Trigger a refresh to pick up new messages
       scheduleRefresh(200);
       sendResponse({ ok: true });
@@ -1698,6 +2074,73 @@
       scheduleRefresh(200);
       sendResponse({ ok: true });
       return false;
+    }
+
+    if (msg?.type === 'SWITCH_CHATGPT_BRANCH') {
+      (async () => {
+        try {
+          const convId = getConversationId('chatgpt');
+          if (!convId || !msg.branchNodeId) {
+            sendResponse({ ok: false, error: 'Missing data' });
+            return;
+          }
+
+          // Build children map to find leaf of the branch
+          const conv = await fetchChatGPTConversation(convId, true, true);
+          const childrenMap = {};
+          for (const [id, entry] of Object.entries(conv.mapping || {})) {
+            const parentId = entry.parent;
+            if (parentId) {
+              if (!childrenMap[parentId]) {
+                childrenMap[parentId] = [];
+              }
+              childrenMap[parentId].push(id);
+            }
+          }
+
+          const leafId = findBranchLeaf(msg.branchNodeId, childrenMap);
+
+          // PATCH the conversation to switch current_node
+          const token = await getAccessToken();
+          const res = await fetch(
+            `${getBaseUrl()}/backend-api/conversation/${convId}`,
+            {
+              method: 'PATCH',
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              credentials: 'include',
+              body: JSON.stringify({ current_node: leafId })
+            }
+          );
+
+          if (res.ok) {
+            // Clear cache to force fresh extraction
+            memoryCache.delete(convId);
+            const cacheKey = `${CONV_CACHE_PREFIX}${convId}`;
+            try {
+              await chrome.storage.local.remove(cacheKey);
+            } catch {
+              // Ignore
+            }
+            // Reload the page to reflect the branch switch
+            location.reload();
+            sendResponse({ ok: true });
+          } else {
+            sendResponse({
+              ok: false,
+              error: `API returned ${res.status}`
+            });
+          }
+        } catch (err) {
+          sendResponse({
+            ok: false,
+            error: err.message || 'Switch failed'
+          });
+        }
+      })();
+      return true;
     }
 
     if (msg?.type === 'GET_PLATFORM') {
@@ -1749,9 +2192,38 @@
 
         // Also update raw cache for future use
         updateRawCache('chatgpt', { conversationId, title, messages });
+      } else if (platform === 'claude') {
+        const cached = getRawCache('claude', conversationId);
+
+        if (cached && cached.messages && cached.messages.length > 0) {
+          title = cached.title || getPageTitle('claude') || title;
+          messages = cached.messages;
+        } else {
+          let apiResult = null;
+          try {
+            apiResult = await fetchClaudeConversation(conversationId);
+          } catch (err) {
+            console.warn(
+              '[ConversationIndex] Claude export fetch failed:',
+              err
+            );
+          }
+
+          if (apiResult?.messages?.length > 0) {
+            title = apiResult.title || getPageTitle('claude') || title;
+            messages = apiResult.messages;
+          } else {
+            // Fallback: Extract from DOM (may lose some Markdown formatting)
+            const domMessages = extractClaudeMessagesForExport();
+            if (domMessages.length > 0) {
+              messages = domMessages;
+              title = getPageTitle('claude') || title;
+            }
+          }
+        }
       } else {
         // Other platforms: Try to use cached API data first
-        const cached = getRawCache(platform);
+        const cached = getRawCache(platform, conversationId);
 
         if (cached && cached.messages && cached.messages.length > 0) {
           title = cached.title || title;
@@ -1836,6 +2308,24 @@
     }
 
     return messages;
+  }
+
+  /**
+   * Extract Claude messages for export (fallback to DOM)
+   * @returns {Array} - Array of messages
+   */
+  function extractClaudeMessagesForExport() {
+    const domMessages = extractClaudeMessages(1);
+    return domMessages.map((msg, index) => {
+      const content = msg.text || '';
+      return {
+        id: msg.id || `claude-export-${index}`,
+        role: msg.role,
+        content,
+        text: content,
+        createTime: msg.createTime || Date.now() / 1000
+      };
+    });
   }
 
   /**
@@ -1947,7 +2437,7 @@
   let refreshTimer = null;
   let isRefreshing = false;
   let lastObserverTrigger = 0;
-  const OBSERVER_THROTTLE_MS = 300; // Reduced for better responsiveness
+  const OBSERVER_THROTTLE_MS = 500; // Balanced throttle
 
   // Track message hash for change detection (polling fallback)
   let lastMessageHash = '';
@@ -2015,9 +2505,18 @@
   }
 
   /**
-   * Compute a simple hash of current messages for change detection
+   * Compute a simple hash of current messages for change detection.
+   * Debounced: returns cached result if called within 300ms.
    */
+  let lastHashTime = 0;
+  let cachedHash = '';
+
   function computeMessageHash() {
+    const now = Date.now();
+    if (now - lastHashTime < 300 && cachedHash) {
+      return cachedHash;
+    }
+    lastHashTime = now;
     const platform = detectPlatform();
     if (!platform) return '';
 
@@ -2041,7 +2540,8 @@
       totalTextLength += el.textContent?.length || 0;
     }
 
-    return `${elements.length}:${totalTextLength}`;
+    cachedHash = `${elements.length}:${totalTextLength}`;
+    return cachedHash;
   }
 
   // Watch for DOM changes - enhanced to catch streaming updates
@@ -2144,11 +2644,11 @@
       ]
     });
 
-    // For Claude, also use polling as a fallback for streaming detection
-    // Claude's streaming updates may not always trigger MutationObserver reliably
+    // For Claude, use polling as fallback with longer interval
+    // Primary detection is via fetch interceptor events
     if (platform === 'claude') {
-      startPolling(800); // Poll every 800ms for Claude
-      injectClaudeFetchInterceptor(); // Inject fetch interceptor for API data
+      startPolling(2000); // Poll every 2s as fallback
+      injectClaudeFetchInterceptor();
     }
 
     // Inject fetch interceptors for other platforms to capture raw Markdown

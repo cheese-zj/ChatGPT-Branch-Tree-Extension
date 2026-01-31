@@ -881,8 +881,23 @@
         transform: scale(0.92);
       }
 
+      .header-btn.is-loading {
+        color: var(--accent);
+        pointer-events: none;
+      }
+
+      .header-btn .header-spinner {
+        width: 14px;
+        height: 14px;
+        border: 2px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+
       #settings-btn svg,
-      #info-btn svg {
+      #info-btn svg,
+      #export-markdown svg {
         width: 15px;
         height: 15px;
         transition: transform 0.3s ease;
@@ -1491,9 +1506,213 @@
         padding: 1px 4px;
         font-size: 8px;
       }
+
+      /* Edit Branch Nodes */
+      .tree-node.is-edit-branch {
+        opacity: 0.85;
+      }
+
+      .tree-node.is-edit-branch .tree-card {
+        border-left: 2px solid
+          color-mix(in srgb, var(--accent) 60%, transparent);
+        border-radius: 5px;
+        background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+      }
+
+      .tree-node.is-edit-branch:hover .tree-card {
+        border-color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+      }
+
+      .tree-node.is-edit-branch .rail-dot {
+        width: 6px;
+        height: 6px;
+        background: var(--bg);
+        border: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+        box-sizing: border-box;
+      }
+
+      .tree-node.is-edit-branch:hover .rail-dot {
+        background: var(--accent);
+      }
+
+      .card-label.label-edit-branch {
+        background: color-mix(in srgb, var(--accent) 15%, transparent);
+        color: var(--accent);
+        font-weight: 700;
+      }
+
+      .card-descendant-count {
+        font-size: 9px;
+        color: var(--text-muted);
+        opacity: 0.8;
+      }
+
+      /* Icon styles for branch labels */
+      .card-icon {
+        display: inline-block;
+        margin-right: 4px;
+        font-size: 11px;
+        line-height: 1;
+      }
+
+      .card-label-text {
+        display: inline-block;
+      }
+
+      /* Pre-branch indicator styles */
+      .pre-branch-banner {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        background: color-mix(in srgb, var(--accent) 8%, transparent);
+        border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+        border-radius: 6px;
+        font-size: 11px;
+        color: var(--text);
+      }
+
+      .pre-branch-icon {
+        font-size: 14px;
+        flex-shrink: 0;
+      }
+
+      .pre-branch-text {
+        flex: 1;
+        line-height: 1.4;
+      }
+
+      .is-pre-branch-indicator {
+        pointer-events: none;
+        opacity: 0.9;
+      }
+
+      .pre-branch-indicator-card {
+        background: transparent !important;
+      }
+
+      /* Edit branch connector - L-junction from main line */
+      .tree-node.is-edit-branch .rail-connector {
+        position: relative;
+      }
+
+      .tree-node.is-edit-branch .rail-connector::before {
+        content: '';
+        position: absolute;
+        left: calc(-0.5 * var(--rail-size) - 1px);
+        bottom: 49%;
+        width: calc(0.5 * var(--rail-size) + 2px);
+        height: 94%;
+        background: transparent;
+        border-left: 2px solid
+          color-mix(in srgb, var(--accent) 40%, transparent);
+        border-bottom: 2px solid
+          color-mix(in srgb, var(--accent) 40%, transparent);
+        border-radius: 0 0 0 12px;
+        box-sizing: border-box;
+      }
+
+      .tree-node.is-edit-branch .rail-connector::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 50%;
+        width: 6px;
+        height: 2px;
+        background: color-mix(in srgb, var(--accent) 40%, transparent);
+        transform: translateY(-50%);
+        z-index: 0;
+      }
+
+      /* Search input */
+      #search-container {
+        padding: 0 0 8px;
+        flex-shrink: 0;
+      }
+
+      #search-input {
+        width: 100%;
+        padding: 7px 10px 7px 30px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+        font-size: 12px;
+        outline: none;
+        transition: border-color 0.15s ease;
+      }
+
+      #search-input:focus {
+        border-color: var(--accent);
+      }
+
+      #search-input::placeholder {
+        color: var(--text-muted);
+        opacity: 0.6;
+      }
+
+      .search-wrapper {
+        position: relative;
+      }
+
+      .search-icon {
+        position: absolute;
+        left: 9px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 13px;
+        height: 13px;
+        color: var(--text-muted);
+        pointer-events: none;
+      }
+
+      .tree-node.search-hidden {
+        display: none;
+      }
+
+      .search-highlight {
+        background: color-mix(in srgb, var(--accent) 30%, transparent);
+        border-radius: 2px;
+      }
+
+      /* Keyboard focus */
+      .tree-node:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+        border-radius: 6px;
+      }
+
+      .tree-node:focus-visible .tree-card {
+        border-color: var(--accent);
+      }
     </style>
   </head>
   <body>
+    <div id="search-container">
+      <div class="search-wrapper">
+        <svg
+          class="search-icon"
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke-width="2"
+          stroke="currentColor"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+          />
+        </svg>
+        <input
+          type="search"
+          id="search-input"
+          placeholder="Search messages... (/ to focus)"
+          autocomplete="off"
+        />
+      </div>
+    </div>
     <div id="tree-root">
       <div id="tooltip" class="tooltip"></div>
     </div>
@@ -1521,6 +1740,26 @@
               stroke-linecap="round"
               stroke-linejoin="round"
               d="M9.75 19.5h4.5M10.5 21h3"
+            />
+          </svg>
+        </button>
+        <button
+          id="export-markdown"
+          class="header-btn"
+          title="Export Markdown"
+          aria-label="Export Markdown"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke-width="1.5"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
             />
           </svg>
         </button>
@@ -1645,22 +1884,6 @@
             </svg>
             Refresh Tree
           </button>
-          <button id="export-markdown" class="export">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke-width="1.5"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
-              />
-            </svg>
-            Export as Markdown
-          </button>
           <button id="clear-data" class="danger">
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -1725,7 +1948,7 @@
               automatically.
             </li>
           </ul>
-          <div><strong>Version:</strong> 0.3.0</div>
+          <div><strong>Version:</strong> 0.4.0</div>
         </div>
       </div>
     </div>

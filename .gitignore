@@ -6,3 +6,6 @@ _debug
 _metadata
 dist
 **/*.swp 
+CLAUDE.md
+.opencode/
+.claude/

@@ -52,8 +52,29 @@ export class ChatGPTAdapter extends BaseAdapter {
   }
 
   getConversationId() {
-    const match = location.pathname.match(/\/c\/([0-9a-f-]+)/i);
+    // Match both regular IDs and WEB: prefixed pre-branch IDs
+    const match = location.pathname.match(/\/c\/((?:WEB:)?[0-9a-f-]+)/i);
     return match?.[1] || null;
+  }
+
+  /**
+   * Check if current conversation is a pre-branch state (WEB: prefix)
+   * @returns {boolean}
+   */
+  isPreBranch() {
+    const id = this.getConversationId();
+    return id ? id.startsWith('WEB:') : false;
+  }
+
+  /**
+   * Extract the clean conversation ID (remove WEB: prefix if present)
+   * @param {string} [id] - Conversation ID (defaults to current)
+   * @returns {string|null} - Clean ID
+   */
+  getCleanConversationId(id) {
+    const convId = id || this.getConversationId();
+    if (!convId) return null;
+    return convId.replace(/^WEB:/, '');
   }
 
   getBaseUrl() {
@@ -104,21 +125,22 @@ export class ChatGPTAdapter extends BaseAdapter {
     isCurrent = false,
     retryOnAuthError = true
   ) {
+    // For WEB: prefixed IDs, fetch the parent conversation
+    const cleanId = this.getCleanConversationId(conversationId);
+    const fetchId = cleanId;
+
     // Check cache first
     if (useCache) {
-      const cached = await storage.getCachedConversation(
-        conversationId,
-        isCurrent
-      );
+      const cached = await storage.getCachedConversation(fetchId, isCurrent);
       if (cached) {
-        this.debug('Using cached conversation:', conversationId);
+        this.debug('Using cached conversation:', fetchId);
         return cached;
       }
     }
 
     const token = await this.getAccessToken();
     const res = await fetch(
-      `${this.getBaseUrl()}/backend-api/conversation/${conversationId}`,
+      `${this.getBaseUrl()}/backend-api/conversation/${fetchId}`,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -138,7 +160,7 @@ export class ChatGPTAdapter extends BaseAdapter {
     if (!res.ok) throw new Error(`Conversation fetch failed: ${res.status}`);
 
     const data = await res.json();
-    await storage.setCachedConversation(conversationId, data);
+    await storage.setCachedConversation(fetchId, data);
 
     return data;
   }
@@ -161,14 +183,28 @@ export class ChatGPTAdapter extends BaseAdapter {
       throw new Error('No conversation ID found');
     }
 
+    const isPreBranch = this.isPreBranch();
+    const cleanId = this.getCleanConversationId(conversationId);
     const conv = await this.fetchConversation(conversationId, true, true);
-    const messages = this._normalizeMessages(conv.mapping, conv.current_node);
+    const messages = this._extractTree(conv.mapping, conv.current_node);
+
+    // Add pre-branch indicator if in pre-branch state
+    if (isPreBranch) {
+      messages.push({
+        id: 'pre-branch-indicator',
+        type: 'preBranchIndicator',
+        text: 'You are viewing a branch preview. Send a message to create a new branch.',
+        depth: 0,
+        isPersistent: true
+      });
+    }
 
     return {
-      conversationId,
+      conversationId: cleanId,
       title: conv.title || 'Conversation',
       messages,
-      raw: conv
+      raw: conv,
+      isPreBranch
     };
   }
 
@@ -258,6 +294,130 @@ export class ChatGPTAdapter extends BaseAdapter {
     }
 
     return messages;
+  }
+
+  /**
+   * Extract conversation tree with edit branch nodes
+   * @param {Object} mapping - ChatGPT conversation mapping
+   * @param {string} currentNode - Current node ID
+   * @returns {Message[]}
+   */
+  _extractTree(mapping, currentNode) {
+    if (!mapping) return [];
+
+    const childrenMap = {};
+    const parentMap = {};
+    let rootId = null;
+
+    for (const [_id, entry] of Object.entries(mapping)) {
+      const parentId = entry.parent;
+      if (!parentId) {
+        rootId = _id;
+      } else {
+        parentMap[_id] = parentId;
+        if (!childrenMap[parentId]) {
+          childrenMap[parentId] = [];
+        }
+        childrenMap[parentId].push(_id);
+      }
+    }
+
+    const currentPath = this._buildCurrentPath(mapping, rootId, currentNode);
+    const messages = [];
+
+    for (const nodeId of currentPath) {
+      const entry = mapping[nodeId];
+      const msg = entry?.message;
+      if (!msg) continue;
+
+      const role = msg.author?.role;
+      if (role !== 'user' && role !== 'assistant') continue;
+
+      const text = this.extractText(msg);
+      if (!text || !text.trim()) continue;
+      if (this._isInternalMessage(text)) continue;
+
+      const parent = parentMap[nodeId];
+      const siblings = parent ? childrenMap[parent] || [] : [];
+      const sortedSiblings = siblings
+        .map((id) => ({
+          id,
+          createTime: mapping[id]?.message?.create_time || 0
+        }))
+        .sort((a, b) => a.createTime - b.createTime);
+
+      const hasSiblings = sortedSiblings.length > 1;
+      const editVersionIndex = hasSiblings
+        ? sortedSiblings.findIndex((s) => s.id === nodeId) + 1
+        : 1;
+
+      messages.push({
+        id: nodeId,
+        role,
+        text,
+        createTime: this.toSeconds(msg.create_time || 0),
+        parentId: parent,
+        hasEditVersions: hasSiblings,
+        editVersionIndex: hasSiblings ? editVersionIndex : undefined,
+        totalVersions: hasSiblings ? sortedSiblings.length : undefined,
+        siblingIds: hasSiblings ? sortedSiblings.map((s) => s.id) : undefined
+      });
+
+      if (hasSiblings) {
+        for (const sib of sortedSiblings) {
+          if (sib.id === nodeId) continue;
+          const sibEntry = mapping[sib.id];
+          const sibMsg = sibEntry?.message;
+          const sibText = sibMsg ? this.extractText(sibMsg) : '';
+          const sibRole = sibMsg?.author?.role;
+          if (!sibText || !sibText.trim()) continue;
+
+          const sibIndex = sortedSiblings.findIndex((s) => s.id === sib.id) + 1;
+
+          messages.push({
+            id: `edit-branch:${sib.id}`,
+            type: 'editBranch',
+            role: sibRole,
+            text: sibText,
+            createTime: this.toSeconds(sib.createTime || 0),
+            depth: 1,
+            branchNodeId: sib.id,
+            editVersionLabel: `Edit v${sibIndex}/${sortedSiblings.length}`,
+            descendantCount: this._countDescendants(
+              sib.id,
+              childrenMap,
+              mapping
+            ),
+            icon: 'edit' // Icon type for visual distinction
+          });
+        }
+      }
+    }
+
+    return messages;
+  }
+
+  /**
+   * Count descendants of a node
+   */
+  _countDescendants(nodeId, childrenMap, mapping) {
+    let count = 0;
+    const stack = [nodeId];
+    while (stack.length > 0) {
+      const id = stack.pop();
+      const children = childrenMap[id] || [];
+      for (const childId of children) {
+        const msg = mapping[childId]?.message;
+        if (
+          msg &&
+          (msg.author?.role === 'user' || msg.author?.role === 'assistant')
+        ) {
+          count++;
+        }
+        stack.push(childId);
+      }
+    }
+    return count;
   }
 
   /**
@@ -375,8 +535,24 @@ export class ChatGPTAdapter extends BaseAdapter {
   }
 
   _handleBranchClick(e) {
-    const text = e.target?.textContent?.trim();
-    if (text === 'Branch in new chat') {
+    const target = e.target;
+    if (!target) return;
+
+    // Multiple heuristics for resilience
+    const text = (target.textContent || '').trim().toLowerCase();
+    const ariaLabel = (target.getAttribute('aria-label') || '').toLowerCase();
+    const testId = target.dataset?.testid || '';
+    const hasParent = target.closest(
+      '[data-testid*="branch"], [aria-label*="branch" i]'
+    );
+
+    const isBranch =
+      text.includes('branch') ||
+      ariaLabel.includes('branch') ||
+      testId.includes('branch') ||
+      hasParent;
+
+    if (isBranch) {
       const convId = this.getConversationId();
       if (convId) {
         const timestampSeconds = Math.floor(Date.now() / 1000);

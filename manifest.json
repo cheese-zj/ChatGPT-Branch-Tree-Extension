@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Conversation Index",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Unified conversation indexer for ChatGPT, Claude, Gemini, and Perplexity. Navigate messages, track branches, and view edit versions across AI platforms.",
   "permissions": ["tabs", "storage", "scripting", "sidePanel", "webRequest"],
   "host_permissions": [

@@ -54,8 +54,12 @@ export function buildDisplayList(messages, options = {}) {
   const { conversationId, title, branchData } = options;
   const result = [];
 
+  // Separate edit branch nodes from regular messages
+  const editBranches = messages.filter((m) => m.type === 'editBranch');
+  const regularMessages = messages.filter((m) => m.type !== 'editBranch');
+
   // Filter to user messages only (for indexing display)
-  const userMessages = messages.filter((m) => m.role === 'user');
+  const userMessages = regularMessages.filter((m) => m.role === 'user');
 
   // Sort by creation time
   userMessages.sort(
@@ -98,24 +102,38 @@ export function buildDisplayList(messages, options = {}) {
     result.push(node);
   }
 
-  // Add branch nodes from branchData if provided
-  if (branchData?.branches?.[conversationId]) {
-    const branches = branchData.branches[conversationId];
-    const branchNodes = branches.map((branch, idx) => ({
-      id: `branch:${branch.childId}`,
-      type: 'branch',
-      text: branch.firstMessage || branch.title || 'Branched conversation',
-      createTime: toSeconds(branch.createdAt || 0),
-      targetConversationId: branch.childId,
-      branchIndex: idx,
-      depth: 1
-    }));
+  // Add branch nodes and edit branches
+  const hasBranches = branchData?.branches?.[conversationId];
+  const hasEditBranches = editBranches.length > 0;
 
-    // Sort branches by time
-    branchNodes.sort((a, b) => a.createTime - b.createTime);
+  if (hasBranches || hasEditBranches) {
+    const branchNodes = [];
 
-    // Merge with messages chronologically
-    const allItems = [...result.slice(title ? 1 : 0), ...branchNodes];
+    if (hasBranches) {
+      const branches = branchData.branches[conversationId];
+      for (let idx = 0; idx < branches.length; idx++) {
+        const branch = branches[idx];
+        branchNodes.push({
+          id: `branch:${branch.childId}`,
+          type: 'branch',
+          text: branch.firstMessage || branch.title || 'Branched conversation',
+          createTime: toSeconds(branch.createdAt || 0),
+          targetConversationId: branch.childId,
+          branchIndex: idx,
+          depth: 1
+        });
+      }
+    }
+
+    // Merge messages + branches + edit branches chronologically
+    const allItems = [
+      ...result.slice(title ? 1 : 0),
+      ...branchNodes,
+      ...editBranches.map((eb) => ({
+        ...eb,
+        targetConversationId: conversationId
+      }))
+    ];
     allItems.sort((a, b) => toSeconds(a.createTime) - toSeconds(b.createTime));
 
     // Rebuild result with title first
@@ -139,6 +157,12 @@ export function markTerminalNodes(nodes) {
 
     // Last node is terminal
     if (!nextNode) {
+      node.isTerminal = true;
+      continue;
+    }
+
+    // Edit branches are always terminal
+    if (node.type === 'editBranch') {
       node.isTerminal = true;
       continue;
     }
