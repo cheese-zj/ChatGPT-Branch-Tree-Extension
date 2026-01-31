@@ -1654,6 +1654,27 @@
     return typeof id === 'string' ? /^WEB:/i.test(id) : false;
   }
 
+  function selectFirstMessageAfterTimestamp(messages, timestampSeconds) {
+    if (!Array.isArray(messages) || messages.length === 0) return null;
+    const sorted = messages
+      .map((message) => ({
+        text: typeof message?.text === 'string' ? message.text : '',
+        createTime:
+          typeof message?.createTime === 'number' ? message.createTime : 0
+      }))
+      .filter((message) => message.text)
+      .sort((a, b) => a.createTime - b.createTime);
+
+    if (!sorted.length) return null;
+    if (typeof timestampSeconds === 'number') {
+      const match = sorted.find(
+        (message) => message.createTime >= timestampSeconds
+      );
+      if (match) return match.text;
+    }
+    return sorted[0].text;
+  }
+
   function findParentBranch(branchData, childId) {
     if (!branchData?.branches || !childId) return null;
     for (const [parentId, branches] of Object.entries(branchData.branches)) {
@@ -1922,10 +1943,13 @@
       if (!msg || msg.author?.role !== 'user') continue;
       const text = extractText(msg);
       if (!text || isInternalMessage(text)) continue;
-      userMessages.push({ text, createTime: msg.create_time || 0 });
+      const createTime = toSeconds(msg.create_time || 0);
+      userMessages.push({ text, createTime });
     }
-    userMessages.sort((a, b) => a.createTime - b.createTime);
-    const firstMessage = userMessages[0]?.text || null;
+    const firstMessage = selectFirstMessageAfterTimestamp(
+      userMessages,
+      pending.timestamp
+    );
 
     // Record branch
     if (!branchData.branches[pending.parentId]) {
