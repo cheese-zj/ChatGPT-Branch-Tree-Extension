@@ -233,4 +233,123 @@ export class ConversationGraph {
 
     return this.editGroups.get(node.editGroupId) || new Set([messageId]);
   }
+
+  /**
+   * Store conversation metadata including path
+   * @param {string} conversationId - Conversation ID
+   * @param {Array<string>} path - Ordered array of message IDs
+   * @param {Object} metadata - Additional metadata
+   */
+  setConversationPath(conversationId, path, metadata = {}) {
+    // Validate inputs
+    if (!conversationId || typeof conversationId !== 'string') {
+      console.warn(
+        'ConversationGraph.setConversationPath: Invalid or missing conversationId'
+      );
+      return;
+    }
+
+    if (!Array.isArray(path)) {
+      console.warn(
+        'ConversationGraph.setConversationPath: path must be an array'
+      );
+      return;
+    }
+
+    this.conversations.set(conversationId, {
+      path,
+      ...metadata
+    });
+  }
+
+  /**
+   * Get the conversation path (ordered message IDs)
+   * @param {string} conversationId - Conversation ID
+   * @returns {Array<string>} Ordered message IDs
+   */
+  getConversationPath(conversationId) {
+    // Validate input
+    if (!conversationId || typeof conversationId !== 'string') {
+      console.warn(
+        'ConversationGraph.getConversationPath: Invalid or missing conversationId'
+      );
+      return [];
+    }
+
+    const conv = this.conversations.get(conversationId);
+    return conv?.path || [];
+  }
+
+  /**
+   * Find divergence point between two conversations
+   * @param {string} childConvId - Child conversation ID
+   * @param {string} parentConvId - Parent conversation ID
+   * @returns {string|null} Message ID where paths diverge, or null if no common messages
+   */
+  findDivergencePoint(childConvId, parentConvId) {
+    // Validate inputs
+    if (!childConvId || typeof childConvId !== 'string') {
+      console.warn(
+        'ConversationGraph.findDivergencePoint: Invalid or missing childConvId'
+      );
+      return null;
+    }
+
+    if (!parentConvId || typeof parentConvId !== 'string') {
+      console.warn(
+        'ConversationGraph.findDivergencePoint: Invalid or missing parentConvId'
+      );
+      return null;
+    }
+
+    const childPath = this.getConversationPath(childConvId);
+    const parentPath = this.getConversationPath(parentConvId);
+
+    if (!childPath.length || !parentPath.length) return null;
+
+    // Find last common message
+    let divergenceIndex = -1;
+    const minLength = Math.min(childPath.length, parentPath.length);
+
+    for (let i = 0; i < minLength; i++) {
+      if (childPath[i] === parentPath[i]) {
+        divergenceIndex = i;
+      } else {
+        break;
+      }
+    }
+
+    return divergenceIndex >= 0 ? childPath[divergenceIndex] : null;
+  }
+
+  /**
+   * Get messages unique to a conversation after divergence point
+   * @param {string} divergenceMessageId - Where the split happened
+   * @param {string} conversationId - Conversation to get unique messages from
+   * @returns {Array<string>} Message IDs after divergence
+   */
+  getUniquePathAfter(divergenceMessageId, conversationId) {
+    // Validate inputs
+    if (!divergenceMessageId || typeof divergenceMessageId !== 'string') {
+      console.warn(
+        'ConversationGraph.getUniquePathAfter: Invalid or missing divergenceMessageId'
+      );
+      return [];
+    }
+
+    if (!conversationId || typeof conversationId !== 'string') {
+      console.warn(
+        'ConversationGraph.getUniquePathAfter: Invalid or missing conversationId'
+      );
+      return [];
+    }
+
+    const path = this.getConversationPath(conversationId);
+    const divergenceIndex = path.indexOf(divergenceMessageId);
+
+    if (divergenceIndex === -1) return path;
+
+    // Return messages after divergence point
+    return path.slice(divergenceIndex + 1);
+  }
 }
