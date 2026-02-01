@@ -146,7 +146,7 @@ export class ConversationGraph {
 
   /**
    * Process edit version relationships from platform adapter
-   * @param {Array} messages - Messages with siblingIds
+   * @param {Array<{id: string, siblingIds?: string[], parentId?: string}>} messages - Messages with siblingIds
    * @param {string} platform - Platform identifier
    */
   processEditVersions(messages, platform) {
@@ -158,7 +158,7 @@ export class ConversationGraph {
 
   /**
    * Process ChatGPT edit relationships (uses siblingIds)
-   * @param {Array} messages - Messages with siblingIds property
+   * @param {Array<{id: string, siblingIds?: string[], parentId?: string}>} messages - Messages with siblingIds property
    * @private
    */
   _processChatGPTEdits(messages) {
@@ -170,11 +170,21 @@ export class ConversationGraph {
       return;
     }
 
+    const processedGroups = new Set();
+
     for (const msg of messages) {
       if (!msg || typeof msg !== 'object') continue;
-      if (!msg.siblingIds || msg.siblingIds.length <= 1) continue;
+      if (!msg.id || typeof msg.id !== 'string') continue;
+      if (!Array.isArray(msg.siblingIds) || msg.siblingIds.length <= 1)
+        continue;
 
-      const groupId = msg.parentId || `group-${msg.id}`;
+      // Use first sibling ID (sorted) as canonical groupId
+      const sortedSiblings = [...msg.siblingIds].sort();
+      const groupId = sortedSiblings[0];
+
+      // Skip if we've already processed this group
+      if (processedGroups.has(groupId)) continue;
+      processedGroups.add(groupId);
 
       // Create edit group if it doesn't exist
       if (!this.editGroups.has(groupId)) {
@@ -182,7 +192,7 @@ export class ConversationGraph {
       }
 
       // Add all siblings to the group
-      for (const sibId of msg.siblingIds) {
+      for (const sibId of sortedSiblings) {
         this.editGroups.get(groupId).add(sibId);
 
         // Mark nodes as edit versions
@@ -192,7 +202,7 @@ export class ConversationGraph {
           node.isEditVersion = true;
 
           // Add sibling relationships
-          for (const otherId of msg.siblingIds) {
+          for (const otherId of sortedSiblings) {
             if (otherId !== sibId) {
               node.editSiblingIds.add(otherId);
             }
@@ -213,7 +223,7 @@ export class ConversationGraph {
       console.warn(
         'ConversationGraph.getEditSiblings: Invalid or missing messageId'
       );
-      return new Set();
+      return new Set([messageId]);
     }
 
     const node = this.nodes.get(messageId);
