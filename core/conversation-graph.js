@@ -352,4 +352,75 @@ export class ConversationGraph {
     // Return messages after divergence point
     return path.slice(divergenceIndex + 1);
   }
+
+  /**
+   * Validate graph integrity
+   * Checks for orphaned nodes, circular references, and edit group consistency
+   * @returns {Array<Object>} Array of validation errors (empty if valid)
+   */
+  validate() {
+    const errors = [];
+
+    // Check for orphaned nodes (parent doesn't exist)
+    for (const [id, node] of this.nodes) {
+      if (node.parentId && !this.nodes.has(node.parentId)) {
+        errors.push({
+          type: 'orphaned_node',
+          messageId: id,
+          missingParent: node.parentId
+        });
+      }
+    }
+
+    // Check for circular references
+    for (const [id, _] of this.nodes) {
+      if (this._hasCircularPath(id)) {
+        errors.push({
+          type: 'circular_reference',
+          messageId: id
+        });
+      }
+    }
+
+    // Check for inconsistent edit groups
+    for (const [groupId, sibIds] of this.editGroups) {
+      for (const sibId of sibIds) {
+        const node = this.nodes.get(sibId);
+        if (!node) {
+          errors.push({
+            type: 'missing_edit_sibling',
+            editGroupId: groupId,
+            missingMessageId: sibId
+          });
+        } else if (node.editGroupId !== groupId) {
+          errors.push({
+            type: 'edit_group_mismatch',
+            messageId: sibId,
+            expectedGroup: groupId,
+            actualGroup: node.editGroupId
+          });
+        }
+      }
+    }
+
+    return errors;
+  }
+
+  /**
+   * Check if a message has a circular parent chain
+   * @param {string} startId - Starting message ID
+   * @param {Set<string>} visited - Set of visited IDs (for recursion tracking)
+   * @returns {boolean} True if circular reference detected
+   * @private
+   */
+  _hasCircularPath(startId, visited = new Set()) {
+    if (visited.has(startId)) return true;
+
+    visited.add(startId);
+    const node = this.nodes.get(startId);
+
+    if (!node || !node.parentId) return false;
+
+    return this._hasCircularPath(node.parentId, visited);
+  }
 }
