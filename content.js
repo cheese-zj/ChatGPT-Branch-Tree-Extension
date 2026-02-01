@@ -10,7 +10,7 @@ import { ConversationGraph } from './core/conversation-graph.js';
 import * as TreeBuilder from './core/tree-builder.js';
 
 // Feature flag for graph builder (Phase 1: ChatGPT only)
-const USE_GRAPH_BUILDER = false; // Will enable after testing
+const USE_GRAPH_BUILDER = true; // Enabled for testing
 
 // ============================================
 // Platform Detection
