@@ -6,8 +6,21 @@
 
 'use strict';
 
-import { ConversationGraph } from './core/conversation-graph.js';
-import * as TreeBuilder from './core/tree-builder.js';
+// Lazy-load ES modules to avoid static import errors in classic content scripts.
+let graphModulesPromise = null;
+
+function loadGraphModules() {
+  if (!graphModulesPromise) {
+    graphModulesPromise = Promise.all([
+      import(chrome.runtime.getURL('core/conversation-graph.js')),
+      import(chrome.runtime.getURL('core/tree-builder.js'))
+    ]).then(([graphModule, treeModule]) => ({
+      ConversationGraph: graphModule.ConversationGraph,
+      TreeBuilder: treeModule
+    }));
+  }
+  return graphModulesPromise;
+}
 
 // Feature flag for graph builder (Phase 1: ChatGPT only)
 const USE_GRAPH_BUILDER = true; // Enabled for testing
@@ -2318,6 +2331,7 @@ async function handleGetTreeWithGraph() {
   }
 
   try {
+    const { ConversationGraph, TreeBuilder } = await loadGraphModules();
     let messages = [];
     let title = 'Conversation';
     let branchData = await loadBranchData();

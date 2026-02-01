@@ -37,6 +37,19 @@
       "run_at": "document_idle"
     }
   ],
+  "web_accessible_resources": [
+    {
+      "resources": ["core/conversation-graph.js", "core/tree-builder.js"],
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*",
+        "https://perplexity.ai/*",
+        "https://www.perplexity.ai/*"
+      ]
+    }
+  ],
   "side_panel": {
     "default_path": "panel.html"
   },

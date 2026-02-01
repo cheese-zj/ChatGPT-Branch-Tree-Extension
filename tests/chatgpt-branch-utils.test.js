@@ -1,3 +1,5 @@
+/* eslint-env node */
+/* global require, process */
 const assert = require('node:assert/strict');
 
 (async () => {
@@ -24,10 +26,7 @@ const assert = require('node:assert/strict');
     extractChatGPTConversationIdFromPath('/c/web:abc-123'),
     'web:abc-123'
   );
-  assert.equal(
-    extractChatGPTConversationIdFromPath('/c/abc-123'),
-    'abc-123'
-  );
+  assert.equal(extractChatGPTConversationIdFromPath('/c/abc-123'), 'abc-123');
   assert.equal(extractChatGPTConversationIdFromPath('/foo'), null);
 
   // isPreBranchChatGPTId
@@ -40,8 +39,18 @@ const assert = require('node:assert/strict');
   const branchData = {
     branches: {
       parent1: [
-        { childId: 'childA', title: 'Child A', firstMessage: 'Hi', createdAt: 10 },
-        { childId: 'childB', title: 'Child B', firstMessage: 'Yo', createdAt: 20 }
+        {
+          childId: 'childA',
+          title: 'Child A',
+          firstMessage: 'Hi',
+          createdAt: 10
+        },
+        {
+          childId: 'childB',
+          title: 'Child B',
+          firstMessage: 'Yo',
+          createdAt: 20
+        }
       ]
     },
     titles: { parent1: 'Parent Chat' }
