@@ -4,6 +4,21 @@
  */
 
 /**
+ * Validation error object returned by ConversationGraph.validate()
+ * @typedef {Object} ValidationError
+ * @property {string} type - Error type: 'orphaned_node', 'circular_reference',
+ *   'inconsistent_parent_child', 'missing_edit_sibling', 'edit_group_mismatch',
+ *   or 'orphaned_edit_group'
+ * @property {string} messageId - ID of the problematic message
+ * @property {string} [missingParent] - For 'orphaned_node': ID of missing parent
+ * @property {string} [parentId] - For 'inconsistent_parent_child': ID of parent node
+ * @property {string} [editGroupId] - For edit group errors: ID of the edit group
+ * @property {string} [missingMessageId] - For 'missing_edit_sibling': ID of missing sibling
+ * @property {string} [expectedGroup] - For 'edit_group_mismatch': expected group ID
+ * @property {string} [actualGroup] - For 'edit_group_mismatch': actual group ID
+ */
+
+/**
  * Represents a single message node in the graph
  * @class
  */
@@ -355,8 +370,9 @@ export class ConversationGraph {
 
   /**
    * Validate graph integrity
-   * Checks for orphaned nodes, circular references, and edit group consistency
-   * @returns {Array<Object>} Array of validation errors (empty if valid)
+   * Checks for orphaned nodes, circular references, parent-child consistency,
+   * and edit group consistency
+   * @returns {Array<ValidationError>} Array of validation errors (empty if valid)
    */
   validate() {
     const errors = [];
@@ -372,17 +388,35 @@ export class ConversationGraph {
       }
     }
 
-    // Check for circular references
-    for (const [id, _] of this.nodes) {
-      if (this._hasCircularPath(id)) {
-        errors.push({
-          type: 'circular_reference',
-          messageId: id
-        });
+    // Check for bidirectional parent-child consistency
+    for (const [id, node] of this.nodes) {
+      if (node.parentId) {
+        const parent = this.nodes.get(node.parentId);
+        if (parent && !parent.childIds.has(id)) {
+          errors.push({
+            type: 'inconsistent_parent_child',
+            messageId: id,
+            parentId: node.parentId
+          });
+        }
       }
     }
 
-    // Check for inconsistent edit groups
+    // Check for circular references (optimized O(n) with shared visited set)
+    const visitedGlobal = new Set();
+    for (const [id, _] of this.nodes) {
+      if (!visitedGlobal.has(id)) {
+        const circularId = this._findCircularPath(id, visitedGlobal);
+        if (circularId) {
+          errors.push({
+            type: 'circular_reference',
+            messageId: circularId
+          });
+        }
+      }
+    }
+
+    // Check for inconsistent edit groups (forward: group -> nodes)
     for (const [groupId, sibIds] of this.editGroups) {
       for (const sibId of sibIds) {
         const node = this.nodes.get(sibId);
@@ -403,24 +437,65 @@ export class ConversationGraph {
       }
     }
 
+    // Check for orphaned edit groups (reverse: nodes -> group)
+    for (const [id, node] of this.nodes) {
+      if (node.editGroupId && !this.editGroups.has(node.editGroupId)) {
+        errors.push({
+          type: 'orphaned_edit_group',
+          messageId: id,
+          editGroupId: node.editGroupId
+        });
+      }
+    }
+
     return errors;
   }
 
   /**
-   * Check if a message has a circular parent chain
+   * Find circular reference in parent chain (optimized)
+   * Uses shared visited set to avoid redundant traversals (O(n) total complexity)
    * @param {string} startId - Starting message ID
-   * @param {Set<string>} visited - Set of visited IDs (for recursion tracking)
-   * @returns {boolean} True if circular reference detected
+   * @param {Set<string>} visitedGlobal - Global visited set across all checks
+   * @returns {string|null} ID of message in cycle, or null if no cycle
    * @private
    */
-  _hasCircularPath(startId, visited = new Set()) {
-    if (visited.has(startId)) return true;
+  _findCircularPath(startId, visitedGlobal) {
+    const pathSet = new Set();
+    let currentId = startId;
 
-    visited.add(startId);
-    const node = this.nodes.get(startId);
+    while (currentId) {
+      // Already checked this entire path - no cycle
+      if (visitedGlobal.has(currentId)) {
+        // Mark all nodes in current path as visited
+        for (const id of pathSet) {
+          visitedGlobal.add(id);
+        }
+        return null;
+      }
 
-    if (!node || !node.parentId) return false;
+      // Cycle detected in current path
+      if (pathSet.has(currentId)) {
+        return currentId;
+      }
 
-    return this._hasCircularPath(node.parentId, visited);
+      pathSet.add(currentId);
+      const node = this.nodes.get(currentId);
+
+      if (!node || !node.parentId) {
+        // Reached end of chain - mark all as visited
+        for (const id of pathSet) {
+          visitedGlobal.add(id);
+        }
+        return null;
+      }
+
+      currentId = node.parentId;
+    }
+
+    // Mark all nodes in path as visited
+    for (const id of pathSet) {
+      visitedGlobal.add(id);
+    }
+    return null;
   }
 }
