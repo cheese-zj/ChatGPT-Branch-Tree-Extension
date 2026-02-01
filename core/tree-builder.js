@@ -145,6 +145,103 @@ export function buildDisplayList(messages, options = {}) {
 }
 
 /**
+ * Build display tree from conversation graph
+ * @param {ConversationGraph} graph - The conversation graph
+ * @param {string} currentConversationId - Current conversation ID
+ * @param {Object} branchData - Branch relationship data
+ * @returns {Array<TreeNode>} - Display nodes for rendering
+ */
+export function buildTreeFromGraph(graph, currentConversationId, branchData) {
+  const displayNodes = [];
+  const path = graph.getConversationPath(currentConversationId);
+  const visited = new Set();
+
+  // Traverse the main conversation path
+  for (let i = 0; i < path.length; i++) {
+    const msgId = path[i];
+    const node = graph.getNode(msgId);
+
+    if (!node) continue;
+
+    // Add main message at depth 0
+    displayNodes.push({
+      id: msgId,
+      type: 'message',
+      role: node.role,
+      text: node.text,
+      createTime: node.createTime,
+      depth: 0,
+      isShared: node.isShared(),
+      targetConversationId: currentConversationId
+    });
+
+    visited.add(msgId);
+
+    // Add edit siblings at depth 1
+    const siblings = graph.getEditSiblings(msgId);
+    const siblingArray = Array.from(siblings).sort((a, b) => {
+      const nodeA = graph.getNode(a);
+      const nodeB = graph.getNode(b);
+      return nodeA.createTime - nodeB.createTime;
+    });
+
+    siblingArray.forEach((sibId, index) => {
+      if (sibId === msgId || visited.has(sibId)) return;
+
+      const sibNode = graph.getNode(sibId);
+      displayNodes.push({
+        id: sibId,
+        type: 'editBranch',
+        role: sibNode.role,
+        text: sibNode.text,
+        createTime: sibNode.createTime,
+        depth: 1,
+        editVersionLabel: `v${index + 1}/${siblingArray.length}`,
+        icon: 'edit',
+        targetConversationId: currentConversationId
+      });
+
+      visited.add(sibId);
+    });
+
+    // Add external branches that diverged at this message
+    const branches = _findBranchesFromMessage(
+      msgId,
+      currentConversationId,
+      branchData
+    );
+    for (const branch of branches) {
+      displayNodes.push({
+        id: `branch:${branch.childId}`,
+        type: 'branch',
+        text: branch.firstMessage || branch.title || 'Branched conversation',
+        createTime: toSeconds(branch.createdAt || 0),
+        depth: 1,
+        targetConversationId: branch.childId,
+        branchLabel: `Branch: ${branch.title || 'New Chat'}`,
+        icon: 'branch'
+      });
+    }
+  }
+
+  return displayNodes;
+}
+
+/**
+ * Find branches that originated from a specific message
+ * @param {string} messageId - Message ID
+ * @param {string} conversationId - Current conversation ID
+ * @param {Object} branchData - Branch data
+ * @returns {Array} - Branch objects
+ */
+function _findBranchesFromMessage(messageId, conversationId, branchData) {
+  const branches = branchData?.branches?.[conversationId] || [];
+  // For now, return all branches (will be refined with proper branch point tracking)
+  // TODO: Track actual branch point in branch data
+  return branches;
+}
+
+/**
  * Mark terminal nodes in the tree
  * A terminal node has no continuation in its chain
  * @param {TreeNode[]} nodes - Tree nodes
@@ -234,6 +331,7 @@ export function computeRenderSignature(nodes, title, settings = {}) {
 export default {
   toSeconds,
   buildDisplayList,
+  buildTreeFromGraph,
   markTerminalNodes,
   hashString,
   computeRenderSignature
