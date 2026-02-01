@@ -92,7 +92,7 @@ export class ConversationGraph {
     conversationId,
     platform,
     messages,
-    options = {}
+    _options = {}
   ) {
     const graph = new ConversationGraph();
     const errors = [];
