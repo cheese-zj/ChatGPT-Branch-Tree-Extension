@@ -54,6 +54,27 @@ The extension:
 4. Load the folder in `chrome://extensions` (Developer Mode → Load unpacked) to
    test in your browser
 
+## Architecture
+
+### Conversation Graph (Phase 1)
+
+The extension now uses a **deduplicated conversation graph** for ChatGPT:
+
+- **MessageNode**: Each message appears once in the graph
+- **ConversationGraph**: DAG structure with message relationships
+- **Edit Siblings**: Alternate versions shown at same depth
+- **Graph Traversal**: Tree follows conversation structure, not chronological order
+
+Graph builder enabled for ChatGPT via feature flag in `content.js`:
+
+```javascript
+const USE_GRAPH_BUILDER = true; // Enable graph-based tree
+```
+
+Other platforms (Claude, Gemini, Perplexity) use legacy tree builder.
+
+See [Unified Tree Design](docs/plans/2026-02-01-unified-tree-design.md) for details.
+
 ## Manual QA Checklist
 
 - Toggle the panel on a ChatGPT conversation; tree appears and stays in sync
