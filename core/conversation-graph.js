@@ -143,4 +143,84 @@ export class ConversationGraph {
   hasNode(messageId) {
     return this.nodes.has(messageId);
   }
+
+  /**
+   * Process edit version relationships from platform adapter
+   * @param {Array} messages - Messages with siblingIds
+   * @param {string} platform - Platform identifier
+   */
+  processEditVersions(messages, platform) {
+    if (platform === 'chatgpt') {
+      this._processChatGPTEdits(messages);
+    }
+    // Other platforms will be added in Phase 3
+  }
+
+  /**
+   * Process ChatGPT edit relationships (uses siblingIds)
+   * @param {Array} messages - Messages with siblingIds property
+   * @private
+   */
+  _processChatGPTEdits(messages) {
+    // Validate input
+    if (!Array.isArray(messages)) {
+      console.warn(
+        'ConversationGraph._processChatGPTEdits: messages must be an array'
+      );
+      return;
+    }
+
+    for (const msg of messages) {
+      if (!msg || typeof msg !== 'object') continue;
+      if (!msg.siblingIds || msg.siblingIds.length <= 1) continue;
+
+      const groupId = msg.parentId || `group-${msg.id}`;
+
+      // Create edit group if it doesn't exist
+      if (!this.editGroups.has(groupId)) {
+        this.editGroups.set(groupId, new Set());
+      }
+
+      // Add all siblings to the group
+      for (const sibId of msg.siblingIds) {
+        this.editGroups.get(groupId).add(sibId);
+
+        // Mark nodes as edit versions
+        const node = this.nodes.get(sibId);
+        if (node) {
+          node.editGroupId = groupId;
+          node.isEditVersion = true;
+
+          // Add sibling relationships
+          for (const otherId of msg.siblingIds) {
+            if (otherId !== sibId) {
+              node.editSiblingIds.add(otherId);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Get all edit siblings for a message
+   * @param {string} messageId - Message ID
+   * @returns {Set<string>} Set of sibling message IDs (including self)
+   */
+  getEditSiblings(messageId) {
+    // Validate input
+    if (!messageId || typeof messageId !== 'string') {
+      console.warn(
+        'ConversationGraph.getEditSiblings: Invalid or missing messageId'
+      );
+      return new Set();
+    }
+
+    const node = this.nodes.get(messageId);
+    if (!node || !node.editGroupId) {
+      return new Set([messageId]);
+    }
+
+    return this.editGroups.get(node.editGroupId) || new Set([messageId]);
+  }
 }
