@@ -2170,6 +2170,103 @@ async function handleGetTree() {
   }
 }
 
+/**
+ * Handle GET_CONVERSATION_TREE using graph builder
+ * Phase 1: ChatGPT only
+ */
+async function handleGetTreeWithGraph() {
+  const platform = detectPlatform();
+  if (!platform) {
+    return { error: 'Unsupported platform' };
+  }
+
+  const conversationId = getConversationId(platform);
+  if (!conversationId) {
+    return { error: 'No conversation ID found' };
+  }
+
+  try {
+    let messages = [];
+    let title = 'Conversation';
+    let branchData = await loadBranchData();
+    let hasAncestry = false;
+
+    // Extract messages (platform-specific)
+    if (platform === 'chatgpt') {
+      const conv = await fetchChatGPTConversation(conversationId, true, true);
+      title = conv.title || 'Conversation';
+
+      // Check for pending branch
+      const updatedData = await checkPendingBranch(
+        conversationId,
+        title,
+        conv.mapping,
+        branchData
+      );
+      if (updatedData) {
+        branchData = updatedData;
+      }
+
+      // Extract messages (excluding editBranch nodes - graph handles them)
+      messages = extractChatGPTTree(conv.mapping, conv.current_node);
+    }
+
+    // Build conversation graph
+    const { graph, errors } = await ConversationGraph.buildFromConversation(
+      conversationId,
+      platform,
+      messages
+    );
+
+    if (!graph) {
+      return {
+        error: 'Failed to build conversation graph',
+        details: errors
+      };
+    }
+
+    // Update title in branch data
+    branchData.titles[conversationId] = title;
+    await saveBranchData(branchData);
+
+    // Build display tree from graph
+    const nodes = TreeBuilder.buildTreeFromGraph(
+      graph,
+      conversationId,
+      branchData
+    );
+
+    // Add title node if no ancestry
+    const hasTitleNode = nodes.some((n) => n.type === 'title');
+    if (!hasTitleNode && title) {
+      nodes.unshift({
+        id: 'title-node',
+        type: 'title',
+        text: title,
+        depth: 0,
+        targetConversationId: conversationId
+      });
+    }
+
+    // Add warnings if any non-critical errors
+    const warnings = errors.filter((e) => e.type !== 'critical');
+    if (warnings.length > 0) {
+      console.warn('[Graph Builder] Validation warnings:', warnings);
+    }
+
+    return {
+      conversationId,
+      title,
+      nodes,
+      platform,
+      hasAncestry,
+      warnings: warnings.length > 0 ? warnings : undefined
+    };
+  } catch (err) {
+    return { error: err.message || String(err) };
+  }
+}
+
 // ============================================
 // Message Handlers
 // ============================================
@@ -2178,7 +2275,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const platform = detectPlatform();
 
   if (msg?.type === 'GET_CONVERSATION_TREE') {
-    handleGetTree().then(sendResponse);
+    // Use graph builder for ChatGPT if enabled
+    if (platform === 'chatgpt' && USE_GRAPH_BUILDER) {
+      handleGetTreeWithGraph().then(sendResponse);
+    } else {
+      handleGetTree().then(sendResponse);
+    }
     return true;
   }
 
