@@ -8,4 +8,5 @@ const html = readFileSync('panel.html', 'utf8');
 
 assert.ok(panel.includes('card-version-control'));
 assert.ok(panel.includes('version-arrow'));
+assert.ok(panel.includes('SWITCH_EDIT_VERSION'));
 assert.ok(html.includes('.card-version-control'));

@@ -1519,6 +1519,32 @@ function setupTreeEventDelegation() {
 
   // Click handler using event delegation (no closure memory leaks)
   treeRoot.addEventListener('click', (e) => {
+    const arrow = e.target.closest('.version-arrow');
+    if (arrow) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (
+        arrow.classList.contains('is-disabled') ||
+        arrow.getAttribute('aria-disabled') === 'true'
+      ) {
+        return;
+      }
+
+      const node = e.target.closest('.tree-node');
+      const nodeId = node?.dataset?.nodeId;
+      const nodeData = nodeDataMap.get(nodeId);
+      const direction = parseInt(arrow.dataset.direction, 10);
+
+      if (nodeData && Number.isFinite(direction)) {
+        requestEditVersionSwitch({
+          messageId: nodeData.id,
+          direction
+        });
+      }
+      return;
+    }
+
     const node = e.target.closest('.tree-node');
     if (!node) return;
 
@@ -1549,6 +1575,51 @@ async function focusMessageInTab(tabId, nodeId, attempts = 6) {
   return false;
 }
 
+function resolveEditBranchSwitch(node) {
+  if (!node?.siblingIds || !node?.branchNodeId) return null;
+
+  const currentId = node.siblingIds.find((id) => {
+    const data = nodeDataMap.get(id);
+    return data?.type === 'message';
+  });
+
+  const targetIndex = node.siblingIds.indexOf(node.branchNodeId);
+  const currentIndex = currentId ? node.siblingIds.indexOf(currentId) : -1;
+
+  if (targetIndex < 0 || currentIndex < 0 || targetIndex === currentIndex) {
+    return null;
+  }
+
+  return {
+    messageId: currentId,
+    direction: targetIndex > currentIndex ? 1 : -1,
+    steps: Math.abs(targetIndex - currentIndex)
+  };
+}
+
+async function requestEditVersionSwitch({ messageId, direction, steps = 1 }) {
+  if (!activeTabId || !messageId || !direction) return;
+
+  const normalizedDirection = direction < 0 ? -1 : 1;
+  const stepCount = Math.max(1, Number.isFinite(steps) ? Math.abs(steps) : 1);
+
+  const platform = detectPlatformFromUrl(activeTabInfo?.url || '');
+  setStatus('Switching version...', 'loading');
+  const resp = await tabsSendMessageSafe(activeTabId, {
+    type: 'SWITCH_EDIT_VERSION',
+    messageId,
+    direction: normalizedDirection,
+    steps: stepCount,
+    platform
+  });
+
+  if (resp?.ok) {
+    setStatus('Version switched', 'success');
+  } else {
+    setStatus(resp?.error || 'Switch failed');
+  }
+}
+
 async function handleNodeClick(node) {
   if (!activeTabId) return;
 
@@ -1572,18 +1643,14 @@ async function handleNodeClick(node) {
   })();
 
   try {
-    // Handle edit branch clicks - switch ChatGPT to that branch
+    // Handle edit branch clicks - switch edit version in place
     if (type === 'editBranch' && branchNodeId) {
-      setStatus('Switching branch...', 'loading');
-      const resp = await tabsSendMessageSafe(activeTabId, {
-        type: 'SWITCH_CHATGPT_BRANCH',
-        branchNodeId
-      });
-      if (resp?.ok) {
-        setStatus('Branch switched', 'success');
-      } else {
-        setStatus(resp?.error || 'Switch failed');
+      const resolved = resolveEditBranchSwitch(node);
+      if (!resolved) {
+        setStatus('Switch failed');
+        return;
       }
+      await requestEditVersionSwitch(resolved);
       return;
     }
 

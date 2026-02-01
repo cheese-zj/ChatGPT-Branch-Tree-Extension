@@ -537,6 +537,9 @@ function extractChatGPTTree(mapping, currentNode) {
           createTime: toSeconds(sib.createTime || 0),
           depth: 1,
           branchNodeId: sib.id,
+          editVersionIndex: sibIndex,
+          totalVersions: sortedSiblings.length,
+          siblingIds: sortedSiblings.map((s) => s.id),
           editVersionLabel: `Edit v${sibIndex}/${sortedSiblings.length}`,
           descendantCount: countDescendants(sib.id, childrenMap, mapping),
           icon: 'edit' // Icon type for visual distinction
