@@ -1481,30 +1481,53 @@
         letter-spacing: 0.02em;
       }
 
-      /* Edit Version Tag */
-      .card-version-tag {
+      /* Edit Version Control */
+      .card-version-control {
         display: inline-flex;
         align-items: center;
-        padding: 2px 6px;
+        gap: 4px;
+        padding: 2px 4px;
         background: color-mix(in srgb, var(--accent) 12%, transparent);
         border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
         border-radius: 4px;
         font-size: 9px;
         font-weight: 600;
         color: var(--accent);
-        cursor: help;
+      }
+
+      .version-arrow {
+        border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+        background: transparent;
+        color: var(--accent);
+        border-radius: 4px;
+        padding: 0 4px;
+        cursor: pointer;
         transition: all 0.15s ease;
       }
 
-      .card-version-tag:hover {
-        background: color-mix(in srgb, var(--accent) 20%, transparent);
+      .version-arrow:hover {
         border-color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 10%, transparent);
       }
 
-      /* Compact mode adjustments for version tag */
-      body.compact-mode .card-version-tag {
-        padding: 1px 4px;
+      .version-arrow.is-disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+
+      .version-arrow.is-disabled:hover {
+        border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+        background: transparent;
+      }
+
+      /* Compact mode adjustments for version controls */
+      body.compact-mode .card-version-control {
+        padding: 1px 3px;
         font-size: 8px;
+      }
+
+      body.compact-mode .version-arrow {
+        padding: 0 3px;
       }
 
       /* Edit Branch Nodes */

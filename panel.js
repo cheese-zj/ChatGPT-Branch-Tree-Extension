@@ -904,17 +904,47 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
         }
       }
 
-      // Edit version indicator (v1/3 style)
+      // Edit version controls (v1/3 + arrows)
       if (hasVersions && isMessageCard) {
-        const versionTag = document.createElement('span');
-        versionTag.className = 'card-version-tag';
-        versionTag.textContent = `v${editVersionIndex}/${totalVersions}`;
-        versionTag.title = `Version ${editVersionIndex} of ${totalVersions} (edited message)`;
-        // Store sibling IDs for potential future interaction
-        if (siblingIds) {
-          versionTag.dataset.siblingIds = JSON.stringify(siblingIds);
+        const versionControl = document.createElement('span');
+        versionControl.className = 'card-version-control';
+        versionControl.title = `Version ${editVersionIndex} of ${totalVersions} (edited message)`;
+
+        const prevBtn = document.createElement('button');
+        prevBtn.type = 'button';
+        prevBtn.className = 'version-arrow version-prev';
+        prevBtn.setAttribute('aria-label', 'Previous version');
+        prevBtn.dataset.direction = '-1';
+
+        const label = document.createElement('span');
+        label.className = 'version-label';
+        label.textContent = `v${editVersionIndex}/${totalVersions}`;
+
+        const nextBtn = document.createElement('button');
+        nextBtn.type = 'button';
+        nextBtn.className = 'version-arrow version-next';
+        nextBtn.setAttribute('aria-label', 'Next version');
+        nextBtn.dataset.direction = '1';
+
+        const atStart = editVersionIndex <= 1;
+        const atEnd = editVersionIndex >= totalVersions;
+        if (atStart) {
+          prevBtn.classList.add('is-disabled');
+          prevBtn.setAttribute('aria-disabled', 'true');
         }
-        header.appendChild(versionTag);
+        if (atEnd) {
+          nextBtn.classList.add('is-disabled');
+          nextBtn.setAttribute('aria-disabled', 'true');
+        }
+
+        if (siblingIds) {
+          versionControl.dataset.siblingIds = JSON.stringify(siblingIds);
+        }
+
+        versionControl.appendChild(prevBtn);
+        versionControl.appendChild(label);
+        versionControl.appendChild(nextBtn);
+        header.appendChild(versionControl);
       }
 
       // Timestamp on the right
@@ -1193,14 +1223,25 @@ function _updateNodeElement(el, node) {
     }
   }
 
-  // Update version tag
-  const versionTag = el.querySelector('.card-version-tag');
+  // Update version control
+  const versionControl = el.querySelector('.card-version-control');
   if (node.hasEditVersions && node.totalVersions > 1) {
     const vText = `v${node.editVersionIndex}/${node.totalVersions}`;
-    if (versionTag) {
-      if (versionTag.textContent !== vText) {
-        versionTag.textContent = vText;
-      }
+    const label = versionControl?.querySelector('.version-label');
+    if (label && label.textContent !== vText) {
+      label.textContent = vText;
+    }
+    const prevBtn = versionControl?.querySelector('.version-prev');
+    const nextBtn = versionControl?.querySelector('.version-next');
+    const atStart = (node.editVersionIndex || 1) <= 1;
+    const atEnd = (node.editVersionIndex || 1) >= (node.totalVersions || 1);
+    if (prevBtn) {
+      prevBtn.classList.toggle('is-disabled', atStart);
+      prevBtn.setAttribute('aria-disabled', atStart ? 'true' : 'false');
+    }
+    if (nextBtn) {
+      nextBtn.classList.toggle('is-disabled', atEnd);
+      nextBtn.setAttribute('aria-disabled', atEnd ? 'true' : 'false');
     }
   }
 
