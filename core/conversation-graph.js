@@ -81,6 +81,73 @@ export class ConversationGraph {
   }
 
   /**
+   * Build graph from conversation data with error handling
+   * @param {string} conversationId - Current conversation ID
+   * @param {string} platform - Platform identifier
+   * @param {Array} messages - Messages to add
+   * @param {Object} options - Build options
+   * @returns {Object} - { graph, errors }
+   */
+  static async buildFromConversation(
+    conversationId,
+    platform,
+    messages,
+    options = {}
+  ) {
+    const graph = new ConversationGraph();
+    const errors = [];
+
+    try {
+      // Build path array from messages
+      const path = [];
+
+      // Add all messages to graph
+      for (const msg of messages) {
+        try {
+          // Skip edit branch nodes for now (they're handled separately)
+          if (msg.type === 'editBranch') continue;
+
+          graph.addMessage(msg, conversationId);
+
+          // Track path for regular messages
+          if (msg.role === 'user' || msg.role === 'assistant') {
+            path.push(msg.id);
+          }
+        } catch (e) {
+          errors.push({
+            type: 'message_add_failed',
+            messageId: msg.id,
+            error: e.message
+          });
+        }
+      }
+
+      // Store conversation path
+      graph.setConversationPath(conversationId, path, {
+        platform,
+        messageCount: messages.length
+      });
+
+      // Process edit relationships
+      if (messages.length > 0) {
+        graph.processEditVersions(messages, platform);
+      }
+
+      // Validate graph
+      const validationErrors = graph.validate();
+      errors.push(...validationErrors);
+    } catch (e) {
+      errors.push({
+        type: 'critical',
+        error: e.message
+      });
+      return { graph: null, errors };
+    }
+
+    return { graph, errors };
+  }
+
+  /**
    * Add a message to the graph
    * If message already exists, just adds conversationId to existing node
    *
