@@ -2040,6 +2040,129 @@ function scrollToMessage(nodeId, platform) {
   return true;
 }
 
+function isButtonDisabled(btn) {
+  if (!btn) return true;
+  if (btn.disabled) return true;
+  const aria = btn.getAttribute('aria-disabled') || '';
+  if (aria.toLowerCase() === 'true') return true;
+  return btn.classList.contains('disabled');
+}
+
+function getButtonLabel(btn) {
+  return (
+    btn.getAttribute('aria-label') ||
+    btn.getAttribute('title') ||
+    btn.textContent ||
+    ''
+  );
+}
+
+function pickPrevNextFromButtons(buttons, { allowAnyPair = false } = {}) {
+  if (!buttons || buttons.length === 0) return null;
+
+  const prev = buttons.find((btn) =>
+    /prev|previous|earlier/i.test(getButtonLabel(btn))
+  );
+  const next = buttons.find((btn) => /next|later/i.test(getButtonLabel(btn)));
+
+  if (prev || next) return { prev, next };
+  if (allowAnyPair && buttons.length >= 2) {
+    return { prev: buttons[0], next: buttons[1] };
+  }
+
+  return null;
+}
+
+function getSearchRoots(messageEl) {
+  const roots = [messageEl];
+  if (messageEl?.parentElement) roots.push(messageEl.parentElement);
+  const article = messageEl?.closest('[role="article"]');
+  if (article) roots.push(article);
+  const container = messageEl?.closest(
+    '[data-message-id], [data-testid*="message"], [data-testid*="conversation-turn"], [class*="message"]'
+  );
+  if (container) roots.push(container);
+  return Array.from(new Set(roots.filter(Boolean)));
+}
+
+function findVersionControls(messageEl, platform) {
+  if (!messageEl) return null;
+
+  const roots = getSearchRoots(messageEl);
+  const versionPattern = /\b\d+\s*\/\s*\d+\b/;
+
+  for (const root of roots) {
+    const candidates = Array.from(
+      root.querySelectorAll('span, div, button')
+    ).filter((el) => versionPattern.test(el.textContent || ''));
+
+    for (const labelEl of candidates) {
+      const container = labelEl.closest('div') || labelEl.parentElement;
+      if (!container) continue;
+      const buttons = Array.from(container.querySelectorAll('button'));
+      const found = pickPrevNextFromButtons(buttons, { allowAnyPair: true });
+      if (found) return found;
+    }
+  }
+
+  for (const root of roots) {
+    const buttons = Array.from(root.querySelectorAll('button'));
+    const found = pickPrevNextFromButtons(buttons);
+    if (found && (found.prev || found.next)) return found;
+  }
+
+  if (platform !== 'chatgpt') {
+    const pageButtons = Array.from(
+      document.querySelectorAll('button[aria-label], button[title]')
+    ).filter((btn) => {
+      const label = getButtonLabel(btn);
+      return /prev|previous|next|later|version|draft|edit/i.test(label);
+    });
+
+    const found = pickPrevNextFromButtons(pageButtons);
+    if (found) return found;
+  }
+
+  return null;
+}
+
+async function handleSwitchEditVersion({
+  messageId,
+  direction,
+  steps = 1,
+  platform: requestedPlatform
+}) {
+  const platform = requestedPlatform || detectPlatform();
+  if (!platform) return { ok: false, error: 'Unsupported platform' };
+
+  injectStyles();
+  const messageEl = findMessageElement(messageId, platform);
+  if (!messageEl) return { ok: false, error: 'Message not found' };
+
+  const normalizedDirection = direction < 0 ? -1 : 1;
+  const stepCount = Math.max(1, Number.isFinite(steps) ? Math.abs(steps) : 1);
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const controls = findVersionControls(messageEl, platform);
+    if (controls) {
+      const btn = normalizedDirection < 0 ? controls.prev : controls.next;
+      if (!btn || isButtonDisabled(btn)) {
+        return { ok: false, error: 'Version control unavailable' };
+      }
+      for (let i = 0; i < stepCount; i++) {
+        btn.click();
+      }
+      scrollToMessage(messageId, platform);
+      scheduleRefresh(200);
+      return { ok: true };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 300 + attempt * 300));
+  }
+
+  return { ok: false, error: 'Version controls not found' };
+}
+
 // ============================================
 // Main Handler
 // ============================================
@@ -2356,6 +2479,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const ok = scrollToMessage(msg.nodeId, platform);
     sendResponse({ ok });
     return false;
+  }
+
+  if (msg?.type === 'SWITCH_EDIT_VERSION') {
+    handleSwitchEditVersion(msg).then(sendResponse);
+    return true;
   }
 
   if (msg?.type === 'OPEN_CONVERSATION') {
