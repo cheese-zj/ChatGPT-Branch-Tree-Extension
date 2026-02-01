@@ -2180,6 +2180,12 @@ async function handleGetTreeWithGraph() {
     return { error: 'Unsupported platform' };
   }
 
+  const rawChatGPTId =
+    platform === 'chatgpt'
+      ? extractChatGPTConversationIdFromPath(location.pathname)
+      : null;
+  const isPreBranch =
+    platform === 'chatgpt' ? isPreBranchChatGPTId(rawChatGPTId) : false;
   const conversationId = getConversationId(platform);
   if (!conversationId) {
     return { error: 'No conversation ID found' };
@@ -2230,22 +2236,80 @@ async function handleGetTreeWithGraph() {
     await saveBranchData(branchData);
 
     // Build display tree from graph
-    const nodes = TreeBuilder.buildTreeFromGraph(
+    const baseNodes = TreeBuilder.buildTreeFromGraph(
       graph,
       conversationId,
       branchData
     );
 
-    // Add title node if no ancestry
-    const hasTitleNode = nodes.some((n) => n.type === 'title');
-    if (!hasTitleNode && title) {
-      nodes.unshift({
-        id: 'title-node',
-        type: 'title',
+    let nodes = baseNodes;
+
+    // Build branch context if this is a child conversation
+    const parentInfo =
+      platform === 'chatgpt'
+        ? findParentBranch(branchData, conversationId)
+        : null;
+
+    if (parentInfo) {
+      const context = buildBranchContextNodes({
+        branchData,
+        parentId: parentInfo.parentId,
+        currentConversationId: conversationId
+      });
+
+      const currentTitleNode = {
+        id: `current-title:${conversationId}`,
+        type: 'current-title',
         text: title,
         depth: 0,
-        targetConversationId: conversationId
-      });
+        targetConversationId: conversationId,
+        isMainViewing: true
+      };
+
+      nodes = [
+        context.ancestorTitle,
+        context.branchRoot,
+        ...context.branchNodes,
+        currentTitleNode,
+        ...baseNodes
+      ].filter(Boolean);
+      hasAncestry = true;
+    }
+
+    // Add title node if no ancestry
+    if (!hasAncestry) {
+      const hasTitleNode = nodes.some((n) => n.type === 'title');
+      if (!hasTitleNode && title) {
+        nodes.unshift({
+          id: 'title-node',
+          type: 'title',
+          text: title,
+          depth: 0,
+          targetConversationId: conversationId
+        });
+      }
+    }
+
+    // Add pre-branch indicator if viewing a branch preview
+    if (platform === 'chatgpt' && isPreBranch) {
+      const indicator = {
+        id: 'pre-branch-indicator',
+        type: 'preBranchIndicator',
+        text: 'You are viewing a branch preview. Send a message to create a new branch.',
+        depth: 0,
+        isPersistent: true
+      };
+      const insertAfterIndex = nodes.findIndex(
+        (node) =>
+          node.type === 'current-title' ||
+          node.type === 'title' ||
+          node.type === 'ancestor-title'
+      );
+      if (insertAfterIndex >= 0) {
+        nodes.splice(insertAfterIndex + 1, 0, indicator);
+      } else {
+        nodes.unshift(indicator);
+      }
     }
 
     // Add warnings if any non-critical errors
