@@ -458,6 +458,33 @@ function findMainLineContinuation(allNodes, branchIndex, branchDepth) {
 }
 
 /**
+ * Check if there is a same-context continuation for a node after a given index
+ * Scans ALL remaining nodes without early break to find actual continuations
+ * @param {Array} nodes - The flat array of nodes
+ * @param {number} startIndex - Index to start scanning from
+ * @param {number|undefined} colorIndex - The color index to match (undefined for main line)
+ * @returns {boolean} - True if a same-context continuation exists
+ */
+function hasSameContextContinuation(nodes, startIndex, colorIndex) {
+  for (let j = startIndex; j < nodes.length; j++) {
+    const futureNode = nodes[j];
+    // Skip branch markers - they don't break context chains
+    if (futureNode.type === 'branch') continue;
+    // Check if this future node has the same context
+    const sameContext =
+      colorIndex === futureNode.colorIndex ||
+      (colorIndex === undefined && futureNode.colorIndex === undefined);
+    if (sameContext) {
+      return true;
+    }
+    // Don't break early on different-context nodes - keep scanning
+    // The bug was: if (futureNode.colorIndex !== colorIndex) break;
+    // This would miss continuations that appear after intervening branches
+  }
+  return false;
+}
+
+/**
  * Mark terminal nodes in the node array
  * A terminal node is one that has no subsequent nodes in its visual chain
  */
@@ -510,22 +537,12 @@ function markTerminalNodes(nodes) {
 
     // If next node is a branch, check if there's a same-context continuation after it
     if (nextNode.type === 'branch') {
-      let sameContextContinues = false;
-      for (let j = i + 1; j < nodes.length; j++) {
-        const futureNode = nodes[j];
-        if (futureNode.type === 'branch') continue;
-        // Check if this future node has the same context
-        const sameContext =
-          node.colorIndex === futureNode.colorIndex ||
-          (node.colorIndex === undefined &&
-            futureNode.colorIndex === undefined);
-        if (sameContext) {
-          sameContextContinues = true;
-          break;
-        }
-        // If we hit a node with different context, stop looking
-        if (futureNode.colorIndex !== node.colorIndex) break;
-      }
+      // Use helper that scans ALL nodes without early break
+      const sameContextContinues = hasSameContextContinuation(
+        nodes,
+        i + 1,
+        node.colorIndex
+      );
       node.isTerminal = !sameContextContinues;
       continue;
     }
