@@ -4,6 +4,14 @@
  * Supports ChatGPT, Claude, Gemini, Perplexity
  */
 
+import {
+  detectPlatformFromUrl,
+  isSupportedUrl
+} from './core/platform-registry.js';
+
+// Alias for backward compatibility with existing code
+const isChatUrl = isSupportedUrl;
+
 const statusEl = document.getElementById('status');
 const statusDot = document.getElementById('status-dot');
 const treeRoot = document.getElementById('tree-root');
@@ -535,23 +543,7 @@ function setStatus(text, state = 'ready') {
   }
 }
 
-function isChatUrl(url = '') {
-  // Support all platforms: ChatGPT, Claude, Gemini, Perplexity
-  return /https:\/\/(chatgpt\.com|chat\.openai\.com|claude\.ai|gemini\.google\.com|perplexity\.ai)/i.test(
-    url
-  );
-}
-
-/**
- * Detect platform from URL
- */
-function detectPlatformFromUrl(url = '') {
-  if (/chatgpt\.com|chat\.openai\.com/i.test(url)) return 'chatgpt';
-  if (/claude\.ai/i.test(url)) return 'claude';
-  if (/gemini\.google\.com/i.test(url)) return 'gemini';
-  if (/perplexity\.ai/i.test(url)) return 'perplexity';
-  return null;
-}
+// isChatUrl and detectPlatformFromUrl are imported from core/platform-registry.js
 
 // ============================================
 // Tab Management

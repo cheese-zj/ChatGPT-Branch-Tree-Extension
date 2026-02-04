@@ -4,12 +4,14 @@
  * Supports ChatGPT, Claude, Gemini, Perplexity
  */
 
-// Helper to check if URL is a supported AI conversation platform
-function isChatUrl(url = '') {
-  return /https:\/\/(chatgpt\.com|chat\.openai\.com|claude\.ai|gemini\.google\.com|perplexity\.ai)/i.test(
-    url
-  );
-}
+import {
+  detectPlatformFromUrl,
+  isSupportedUrl
+} from './core/platform-registry.js';
+
+// Aliases for existing code patterns
+const isChatUrl = isSupportedUrl;
+const detectPlatform = detectPlatformFromUrl;
 
 // Update side panel availability based on tab URL
 // When disabled, the panel automatically closes and won't open on action click
@@ -26,15 +28,6 @@ async function updateSidePanelForTab(tabId) {
   } catch {
     // Tab may have been closed or is restricted (chrome:// pages)
   }
-}
-
-// Detect platform from URL
-function detectPlatform(url = '') {
-  if (/chatgpt\.com|chat\.openai\.com/i.test(url)) return 'chatgpt';
-  if (/claude\.ai/i.test(url)) return 'claude';
-  if (/gemini\.google\.com/i.test(url)) return 'gemini';
-  if (/perplexity\.ai/i.test(url)) return 'perplexity';
-  return null;
 }
 
 // Open or focus an existing conversation tab

@@ -6,6 +6,10 @@
 
 'use strict';
 
+import { detectPlatformFromUrl } from './core/platform-registry.js';
+import { injectFetchInterceptor } from './core/fetch-interceptor-factory.js';
+import { STORAGE_KEYS, CACHE_TTL } from './core/storage.js';
+
 // Lazy-load ES modules to avoid static import errors in classic content scripts.
 let graphModulesPromise = null;
 
@@ -29,32 +33,22 @@ const USE_GRAPH_BUILDER = true; // Enabled for testing
 // Platform Detection
 // ============================================
 
-const PLATFORM_PATTERNS = {
-  chatgpt: [/^https:\/\/(www\.)?(chatgpt\.com|chat\.openai\.com)/i],
-  claude: [/^https:\/\/(www\.)?claude\.ai/i],
-  gemini: [/^https:\/\/(www\.)?gemini\.google\.com/i],
-  perplexity: [/^https:\/\/(www\.)?perplexity\.ai/i]
-};
-
+// Platform detection is now centralized in core/platform-registry.js
 function detectPlatform() {
-  const url = window.location.href;
-  for (const [platform, patterns] of Object.entries(PLATFORM_PATTERNS)) {
-    if (patterns.some((p) => p.test(url))) {
-      return platform;
-    }
-  }
-  return null;
+  return detectPlatformFromUrl(window.location.href);
 }
 
 // ============================================
-// Storage Helpers (inline to avoid module issues)
+// Storage Helpers
 // ============================================
 
-const STORAGE_KEY = 'chatgpt_branch_data';
-const CONV_CACHE_PREFIX = 'conv_cache_';
-const CURRENT_CONV_TTL_MS = 2 * 60 * 1000;
-const HISTORY_CONV_TTL_MS = 15 * 60 * 1000;
-const TOKEN_TTL_MS = 5 * 60 * 1000;
+// Storage keys and TTL values are imported from core/storage.js
+// Aliases for backward compatibility with existing code
+const STORAGE_KEY = STORAGE_KEYS.BRANCH_DATA;
+const CONV_CACHE_PREFIX = STORAGE_KEYS.CONV_CACHE_PREFIX;
+const CURRENT_CONV_TTL_MS = CACHE_TTL.CURRENT_CONVERSATION;
+const HISTORY_CONV_TTL_MS = CACHE_TTL.HISTORY_CONVERSATION;
+const TOKEN_TTL_MS = CACHE_TTL.ACCESS_TOKEN;
 
 const memoryCache = new Map();
 const MAX_CACHE_SIZE = 50;
@@ -708,50 +702,7 @@ function getClaudeOrgId() {
   return claudeOrgId;
 }
 
-/**
- * Inject fetch interceptor to capture Claude API responses
- * This runs in the page context to intercept window.fetch
- */
-function injectClaudeFetchInterceptor() {
-  // Check if already injected
-  if (document.getElementById('claude-fetch-interceptor')) return;
-
-  const script = document.createElement('script');
-  script.id = 'claude-fetch-interceptor';
-  script.textContent = `
-    (function() {
-      const originalFetch = window.fetch;
-      window.fetch = async function(...args) {
-        const response = await originalFetch.apply(this, args);
-        const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
-        
-        // Intercept Claude conversation API responses
-        if (url.includes('/api/') && (url.includes('chat_conversations') || url.includes('completion'))) {
-          try {
-            const cloned = response.clone();
-            const contentType = cloned.headers.get('content-type') || '';
-            
-            // Only process JSON responses (not streaming)
-            if (contentType.includes('application/json')) {
-              const data = await cloned.json();
-              window.postMessage({
-                type: 'CLAUDE_API_RESPONSE',
-                url: url,
-                data: data
-              }, '*');
-            }
-          } catch(e) {
-            // Silently ignore parse errors
-          }
-        }
-        return response;
-      };
-      console.log('[ConversationIndex] Claude fetch interceptor installed');
-    })();
-  `;
-  document.documentElement.appendChild(script);
-  script.remove();
-}
+// Claude fetch interceptor moved to core/fetch-interceptor-factory.js
 
 function extractClaudeMessagesFromApi(data) {
   if (!data) {
@@ -930,66 +881,7 @@ window.addEventListener('message', (event) => {
 // Gemini API Interception
 // ============================================
 
-/**
- * Inject fetch interceptor for Gemini API responses
- */
-function injectGeminiFetchInterceptor() {
-  if (document.getElementById('gemini-fetch-interceptor')) return;
-
-  const script = document.createElement('script');
-  script.id = 'gemini-fetch-interceptor';
-  script.textContent = `
-    (function() {
-      if (window.__geminiInterceptorInstalled) return;
-      window.__geminiInterceptorInstalled = true;
-      
-      const originalFetch = window.fetch;
-      window.fetch = async function(...args) {
-        const response = await originalFetch.apply(this, args);
-        const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
-        
-        // Intercept Gemini conversation API responses
-        // Gemini uses various endpoints like /batchexecute, /stream, etc.
-        if (url.includes('batchexecute') || url.includes('/conversation') || url.includes('/generate')) {
-          try {
-            const cloned = response.clone();
-            const contentType = cloned.headers.get('content-type') || '';
-            
-            if (contentType.includes('application/json') || contentType.includes('text/')) {
-              const text = await cloned.text();
-              // Gemini responses are often wrapped in )]}' prefix
-              let data = text;
-              if (text.startsWith(")]}'")) {
-                data = text.slice(4);
-              }
-              try {
-                const parsed = JSON.parse(data);
-                window.postMessage({
-                  type: 'GEMINI_API_RESPONSE',
-                  url: url,
-                  data: parsed
-                }, '*');
-              } catch(e) {
-                // If JSON parse fails, try to extract message data from the response
-                window.postMessage({
-                  type: 'GEMINI_API_RESPONSE',
-                  url: url,
-                  data: { rawText: text }
-                }, '*');
-              }
-            }
-          } catch(e) {
-            // Silently ignore errors
-          }
-        }
-        return response;
-      };
-      console.log('[ConversationIndex] Gemini fetch interceptor installed');
-    })();
-  `;
-  document.documentElement.appendChild(script);
-  script.remove();
-}
+// Gemini fetch interceptor moved to core/fetch-interceptor-factory.js
 
 /**
  * Handle Gemini API response data
@@ -1070,50 +962,7 @@ function handleGeminiApiResponse(data, _url) {
 // Perplexity API Interception
 // ============================================
 
-/**
- * Inject fetch interceptor for Perplexity API responses
- */
-function injectPerplexityFetchInterceptor() {
-  if (document.getElementById('perplexity-fetch-interceptor')) return;
-
-  const script = document.createElement('script');
-  script.id = 'perplexity-fetch-interceptor';
-  script.textContent = `
-    (function() {
-      if (window.__perplexityInterceptorInstalled) return;
-      window.__perplexityInterceptorInstalled = true;
-      
-      const originalFetch = window.fetch;
-      window.fetch = async function(...args) {
-        const response = await originalFetch.apply(this, args);
-        const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
-        
-        // Intercept Perplexity search/answer API responses
-        if (url.includes('/api/') && (url.includes('search') || url.includes('query') || url.includes('answer'))) {
-          try {
-            const cloned = response.clone();
-            const contentType = cloned.headers.get('content-type') || '';
-            
-            if (contentType.includes('application/json')) {
-              const data = await cloned.json();
-              window.postMessage({
-                type: 'PERPLEXITY_API_RESPONSE',
-                url: url,
-                data: data
-              }, '*');
-            }
-          } catch(e) {
-            // Silently ignore errors
-          }
-        }
-        return response;
-      };
-      console.log('[ConversationIndex] Perplexity fetch interceptor installed');
-    })();
-  `;
-  document.documentElement.appendChild(script);
-  script.remove();
-}
+// Perplexity fetch interceptor moved to core/fetch-interceptor-factory.js
 
 /**
  * Handle Perplexity API response data
@@ -3108,16 +2957,16 @@ function init() {
   // Primary detection is via fetch interceptor events
   if (platform === 'claude') {
     startPolling(2000); // Poll every 2s as fallback
-    injectClaudeFetchInterceptor();
+    injectFetchInterceptor('claude');
   }
 
   // Inject fetch interceptors for other platforms to capture raw Markdown
   if (platform === 'gemini') {
-    injectGeminiFetchInterceptor();
+    injectFetchInterceptor('gemini');
   }
 
   if (platform === 'perplexity') {
-    injectPerplexityFetchInterceptor();
+    injectFetchInterceptor('perplexity');
   }
 
   scheduleRefresh(100);
