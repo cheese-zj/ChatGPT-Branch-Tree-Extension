@@ -4,7 +4,7 @@
  */
 
 // Storage keys
-const STORAGE_KEYS = {
+export const STORAGE_KEYS = {
   BRANCH_DATA: 'chatgpt_branch_data',
   SETTINGS: 'branchTreeSettings',
   PENDING_BRANCH: 'pendingBranch',
@@ -13,7 +13,7 @@ const STORAGE_KEYS = {
 };
 
 // Cache TTL values (milliseconds)
-const CACHE_TTL = {
+export const CACHE_TTL = {
   CURRENT_CONVERSATION: 2 * 60 * 1000, // 2 minutes
   HISTORY_CONVERSATION: 15 * 60 * 1000, // 15 minutes
   ACCESS_TOKEN: 5 * 60 * 1000 // 5 minutes

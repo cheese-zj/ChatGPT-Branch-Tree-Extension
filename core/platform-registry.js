@@ -139,6 +139,30 @@ export function getPlatformConfigForUrl(url) {
   return null;
 }
 
+/**
+ * Detect platform ID from URL
+ * @param {string} url - URL to check
+ * @returns {string|null} - Platform ID ('chatgpt', 'claude', 'gemini', 'perplexity') or null
+ */
+export function detectPlatformFromUrl(url) {
+  if (!url) return null;
+  for (const [platformId, config] of Object.entries(PLATFORM_CONFIGS)) {
+    if (config.urlPatterns.some((pattern) => pattern.test(url))) {
+      return platformId;
+    }
+  }
+  return null;
+}
+
+/**
+ * Check if URL is a supported AI conversation platform
+ * @param {string} url - URL to check
+ * @returns {boolean} - True if URL matches any supported platform
+ */
+export function isSupportedUrl(url) {
+  return detectPlatformFromUrl(url) !== null;
+}
+
 export default {
   registerAdapter,
   getAdapterForUrl,
@@ -147,5 +171,7 @@ export default {
   getCurrentAdapter,
   PLATFORM_CONFIGS,
   urlMatchesPlatform,
-  getPlatformConfigForUrl
+  getPlatformConfigForUrl,
+  detectPlatformFromUrl,
+  isSupportedUrl
 };
