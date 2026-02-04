@@ -12,12 +12,14 @@
       }
 
       :root {
-        --bg: #141414;
-        --surface: #1a1a1a;
-        --surface-2: #222222;
-        --border: #3a3a3a;
-        --text: #e8e8e8;
-        --text-muted: #888888;
+        /* Warmer dark palette */
+        --bg: #0f0f11;
+        --surface: #16161a;
+        --surface-2: #1c1c21;
+        --border: #2a2a32;
+        --text: #f1f5f9;
+        --text-muted: #64748b;
+        --text-secondary: #94a3b8;
         --accent: #6366f1;
         --accent-glow: rgba(99, 102, 241, 0.3);
         --branch: #10b981;
@@ -26,8 +28,8 @@
         /* Connector variables for tree visualization */
         --connector-width: 2px;
         --connector-overlap: 2px;
-        --branch-curve-radius: 16px;
-        --expanded-branch-gap: 0px; /* Dynamically set by drawBackbones() */
+        --branch-curve-radius: 12px;
+        --expanded-branch-gap: 0px;
       }
 
       @media (prefers-color-scheme: light) {
@@ -47,12 +49,13 @@
 
       /* Theme Override - Force Dark */
       body.theme-dark {
-        --bg: #141414;
-        --surface: #1a1a1a;
-        --surface-2: #222222;
-        --border: #3a3a3a;
-        --text: #e8e8e8;
-        --text-muted: #888888;
+        --bg: #0f0f11;
+        --surface: #16161a;
+        --surface-2: #1c1c21;
+        --border: #2a2a32;
+        --text: #f1f5f9;
+        --text-muted: #64748b;
+        --text-secondary: #94a3b8;
         --accent: #6366f1;
         --accent-glow: rgba(99, 102, 241, 0.3);
         --branch: #10b981;
@@ -222,25 +225,43 @@
         background: var(--border);
       }
 
-      /* Colored backbone per depth column */
-      .tree-backbone {
+      /* SVG Connector System */
+      #tree-connectors {
         position: absolute;
-        width: var(--connector-width);
-        border-radius: 0;
-        opacity: 0.6;
-        z-index: -1;
+        top: 0;
+        left: 0;
+        width: 100%;
         pointer-events: none;
+        z-index: 0;
+        overflow: visible;
+      }
+
+      .connector-path {
+        opacity: 0.8;
+      }
+
+      .connector-dot {
+        transition: transform 0.1s ease;
+      }
+
+      #tree-root:has(.tree-node:hover) #tree-connectors .connector-dot,
+      #tree-connectors .connector-dot:hover {
+        transform: scale(1.2);
+      }
+
+      /* Hide CSS rail-dot when SVG dots are active */
+      .rail-dot {
+        opacity: 0;
       }
 
       /* Tree Node Animation */
+      /* Subtle fade-in animation */
       @keyframes nodeEnter {
         from {
           opacity: 0;
-          transform: translateY(4px);
         }
         to {
           opacity: 1;
-          transform: translateY(0);
         }
       }
 
@@ -339,23 +360,23 @@
         gap: 8px;
         padding: 2px 0;
         cursor: pointer;
-        transition: background 0.15s ease;
+        transition: background 0.1s ease;
         border-radius: 6px;
         margin: 0;
-        animation: nodeEnter 0.2s ease forwards;
+        animation: nodeEnter 0.15s ease forwards;
         opacity: 0;
       }
 
       .tree-node:hover {
-        background: color-mix(in srgb, var(--accent) 6%, transparent);
+        background: transparent;
       }
 
       .tree-node:hover .tree-card {
-        border-color: var(--color, var(--accent));
+        border-color: color-mix(in srgb, var(--color, var(--accent)) 40%, var(--border));
       }
 
       .tree-node.is-branch:hover .tree-card {
-        border-color: var(--color, var(--branch));
+        border-color: color-mix(in srgb, var(--color, var(--branch)) 50%, var(--border));
       }
 
       /* Rail (visual connector) */
@@ -393,72 +414,7 @@
         justify-content: center;
       }
 
-      /* Regular node connectors - straight vertical lines */
-      .rail-connector.has-above::before {
-        content: '';
-        position: absolute;
-        left: 50%;
-        top: calc(-1 * var(--connector-overlap));
-        height: calc(50% + var(--connector-overlap));
-        width: var(--connector-width);
-        background: var(--color, var(--accent));
-        transform: translateX(-50%);
-        border-radius: 0;
-      }
-
-      .rail-connector.has-below::after {
-        content: '';
-        position: absolute;
-        left: 50%;
-        bottom: calc(-1 * var(--connector-overlap));
-        height: calc(50% + var(--connector-overlap));
-        width: var(--connector-width);
-        background: var(--color, var(--accent));
-        transform: translateX(-50%);
-        border-radius: 0;
-      }
-
-      /* Ensure regular connectors don't inherit branch styling */
-      .rail-connector.has-above:not(.branch-connector)::before,
-      .rail-connector.has-below:not(.branch-connector)::after {
-        border: none;
-        border-radius: 0;
-      }
-
-      /* Branch connector - curved L-junction from main line */
-      .rail-connector.branch-connector {
-        position: relative;
-      }
-
-      /* Curved L-corner: vertical segment going up to backbone */
-      .rail-connector.branch-connector::before {
-        content: '';
-        position: absolute;
-        left: calc(-0.5 * var(--rail-size) - 1px);
-        bottom: 49%;
-        width: calc(0.5 * var(--rail-size) + var(--connector-width));
-        height: 94%;
-        background: transparent;
-        border-left: var(--connector-width) solid var(--color, var(--branch));
-        border-bottom: var(--connector-width) solid var(--color, var(--branch));
-        border-radius: 0 0 0 var(--branch-curve-radius);
-        box-sizing: border-box;
-      }
-
-      /* Horizontal arm from L-corner to dot */
-      .rail-connector.branch-connector::after {
-        content: '';
-        position: absolute;
-        left: 0;
-        top: 50%;
-        width: 6px;
-        height: var(--connector-width);
-        background: var(--color, var(--branch));
-        transform: translateY(-50%);
-        border-radius: 0;
-        z-index: 0;
-      }
-
+      /* Rail dot - hidden, SVG dots used instead */
       .rail-dot {
         width: 6px;
         height: 6px;
@@ -499,7 +455,7 @@
         border-radius: 5px;
       }
 
-      /* Title node styles - gradient background for visual distinction */
+      /* Title node styles - minimal flat styling */
       .tree-node.is-title .rail-dot {
         width: 8px;
         height: 8px;
@@ -507,24 +463,17 @@
       }
 
       .tree-node.is-title .tree-card {
-        background: linear-gradient(
-          135deg,
-          color-mix(in srgb, var(--accent) 6%, var(--surface)) 0%,
-          color-mix(in srgb, var(--accent) 3%, var(--surface)) 100%
-        );
-        border-color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+        border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
         border-left-width: 3px;
+        border-left-color: var(--accent);
       }
 
-      /* Ancestor title styling - subtle gradient, more muted */
+      /* Ancestor title styling - muted flat */
       .tree-node.is-ancestor-title .tree-card {
-        background: linear-gradient(
-          135deg,
-          color-mix(in srgb, var(--text-muted) 8%, var(--surface)) 0%,
-          var(--surface) 100%
-        );
+        background: var(--surface);
         border-color: var(--border);
-        opacity: 0.9;
+        opacity: 0.85;
       }
 
       .tree-node.is-ancestor-title .rail-dot {
@@ -542,15 +491,11 @@
         margin-bottom: 2px;
       }
 
-      /* Current title styling - highlighted with stronger gradient */
+      /* Current title styling - highlighted flat */
       .tree-node.is-current-title .tree-card {
-        background: linear-gradient(
-          135deg,
-          color-mix(in srgb, var(--accent) 15%, var(--surface)) 0%,
-          color-mix(in srgb, var(--accent) 5%, var(--surface)) 100%
-        );
+        background: color-mix(in srgb, var(--accent) 8%, var(--surface));
         border-color: var(--accent);
-        border-width: 2px;
+        border-width: 1px;
         border-left-width: 3px;
       }
 
@@ -562,14 +507,9 @@
 
       /* Main conversation being viewed (no ancestry) */
       .tree-node.is-main-viewing .tree-card {
-        background: linear-gradient(
-          135deg,
-          color-mix(in srgb, var(--accent) 14%, var(--surface)) 0%,
-          color-mix(in srgb, var(--accent) 6%, var(--surface)) 100%
-        );
+        background: color-mix(in srgb, var(--accent) 8%, var(--surface));
         border-color: var(--accent);
-        box-shadow: 0 6px 18px
-          color-mix(in srgb, var(--accent) 18%, transparent);
+        border-left-width: 3px;
       }
 
       .card-current-label {
@@ -611,40 +551,9 @@
         border-left-width: 3px;
       }
 
-      /* Vertical line going down from expanded branch into its children - COLORED */
-      /* Height is dynamically set via --expanded-branch-gap by drawBackbones() */
-      .rail-connector.branch-connector.branch-expanded .rail-dot::after {
-        content: '';
-        position: absolute;
-        left: 50%;
-        top: 100%;
-        width: var(--connector-width);
-        height: var(--expanded-branch-gap, 28px);
-        background: var(--branch-color, var(--branch));
-        transform: translateX(-50%);
-        border-radius: 0;
-      }
-
-      /* Terminal nodes (end of their chain) should not have any outgoing edges below */
-      /* For regular nodes, hide the has-below line */
-      .tree-node.is-terminal:not(.is-branch) .rail-connector.has-below::after {
-        display: none !important;
-      }
-
-      /* But expanded branches should still show line down to their children */
-      /* Ensure expanded branches show their line down to children */
-      .tree-node.is-expanded .rail-connector.branch-expanded .rail-dot::after {
-        display: block !important;
-      }
-
       /* Current conversation nodes get subtle highlight */
       .tree-node.is-current .tree-card {
         background: color-mix(in srgb, var(--accent) 5%, var(--surface));
-      }
-
-      /* Last node in the entire list should not have any outgoing connector */
-      .tree-node.is-last-node:not(.is-branch) .rail-connector.has-below::after {
-        display: none;
       }
 
       /* Label for expanded branches */
@@ -677,41 +586,16 @@
       }
 
       .tree-node.is-branch.is-viewing .tree-card {
-        background: linear-gradient(
-          135deg,
-          color-mix(
-              in srgb,
-              var(--branch-color, var(--branch)) 16%,
-              var(--surface)
-            )
-            0%,
-          color-mix(
-              in srgb,
-              var(--branch-color, var(--branch)) 6%,
-              var(--surface)
-            )
-            100%
-        );
+        background: color-mix(in srgb, var(--branch-color, var(--branch)) 10%, var(--surface));
         border-color: var(--branch-color, var(--branch));
-        box-shadow: 0 4px 18px
-          color-mix(
-            in srgb,
-            var(--branch-color, var(--branch)) 18%,
-            transparent
-          );
+        border-left-width: 3px;
       }
 
       .tree-node.is-branch.is-viewing .rail-dot {
         background: var(--branch-color, var(--branch));
-        box-shadow: 0 0 0 4px
-          color-mix(
-            in srgb,
-            var(--branch-color, var(--branch)) 22%,
-            transparent
-          );
       }
 
-      /* Card */
+      /* Card - Minimal styling */
       .tree-card {
         flex: 1;
         background: var(--surface);
@@ -719,7 +603,11 @@
         border-radius: 6px;
         padding: 8px 10px;
         min-width: 0;
-        transition: border-color 0.15s ease;
+        transition: background 0.1s ease, border-color 0.1s ease;
+      }
+
+      .tree-card:hover {
+        background: var(--surface-2);
       }
 
       .tree-card.message-card {
@@ -1638,39 +1526,6 @@
 
       .pre-branch-indicator-card {
         background: transparent !important;
-      }
-
-      /* Edit branch connector - L-junction from main line */
-      .tree-node.is-edit-branch .rail-connector {
-        position: relative;
-      }
-
-      .tree-node.is-edit-branch .rail-connector::before {
-        content: '';
-        position: absolute;
-        left: calc(-0.5 * var(--rail-size) - 1px);
-        bottom: 49%;
-        width: calc(0.5 * var(--rail-size) + 2px);
-        height: 94%;
-        background: transparent;
-        border-left: 2px solid
-          color-mix(in srgb, var(--accent) 40%, transparent);
-        border-bottom: 2px solid
-          color-mix(in srgb, var(--accent) 40%, transparent);
-        border-radius: 0 0 0 12px;
-        box-sizing: border-box;
-      }
-
-      .tree-node.is-edit-branch .rail-connector::after {
-        content: '';
-        position: absolute;
-        left: 0;
-        top: 50%;
-        width: 6px;
-        height: 2px;
-        background: color-mix(in srgb, var(--accent) 40%, transparent);
-        transform: translateY(-50%);
-        z-index: 0;
       }
 
       /* Search input */
