@@ -333,7 +333,8 @@ function measureNodePositions() {
     const dotCenter = dotRect
       ? {
           x: dotRect.left - rootRect.left + dotRect.width / 2,
-          y: dotRect.top - rootRect.top + treeRoot.scrollTop + dotRect.height / 2
+          y:
+            dotRect.top - rootRect.top + treeRoot.scrollTop + dotRect.height / 2
         }
       : { x: 0, y: 0 };
 
@@ -463,7 +464,11 @@ function generateConnectorPaths(measurements) {
       let startY = curr.dotCenter.y - 40;
       for (let j = i - 1; j >= 0; j--) {
         const prevNode = measurements[j];
-        if (prevNode.depth === parentDepth && prevNode.type !== 'branch' && prevNode.type !== 'editBranch') {
+        if (
+          prevNode.depth === parentDepth &&
+          prevNode.type !== 'branch' &&
+          prevNode.type !== 'editBranch'
+        ) {
           startY = prevNode.dotCenter.y;
           break;
         }
@@ -476,7 +481,13 @@ function generateConnectorPaths(measurements) {
 
       paths.push({
         type: 'l-curve',
-        d: createLCurvePath(parentX, startY, curr.dotCenter.x, curr.dotCenter.y, 12),
+        d: createLCurvePath(
+          parentX,
+          startY,
+          curr.dotCenter.x,
+          curr.dotCenter.y,
+          12
+        ),
         color: curr.color,
         order: 2
       });
@@ -515,7 +526,10 @@ function generateConnectorPaths(measurements) {
       // Find the first child (next node at depth + 1 with same colorIndex)
       for (let j = i + 1; j < measurements.length; j++) {
         const child = measurements[j];
-        if (child.depth === curr.depth + 1 && child.colorIndex === curr.colorIndex) {
+        if (
+          child.depth === curr.depth + 1 &&
+          child.colorIndex === curr.colorIndex
+        ) {
           paths.push({
             type: 'vertical',
             d: `M ${curr.dotCenter.x} ${curr.dotCenter.y} L ${curr.dotCenter.x} ${child.dotCenter.y}`,
@@ -550,16 +564,25 @@ function shouldConnectVertical(prev, curr, measurements, currIndex) {
     // Same colorIndex means same branch context
     if (prev.colorIndex === curr.colorIndex) return true;
     // Both undefined colorIndex means main line
-    if (prev.colorIndex === undefined && curr.colorIndex === undefined) return true;
+    if (prev.colorIndex === undefined && curr.colorIndex === undefined)
+      return true;
   }
 
   // Connect from expanded branch to its children
-  if (prev.type === 'branch' && prev.isExpanded && curr.depth === prev.depth + 1) {
+  if (
+    prev.type === 'branch' &&
+    prev.isExpanded &&
+    curr.depth === prev.depth + 1
+  ) {
     if (curr.colorIndex === prev.colorIndex) return true;
   }
 
   // Connect from title to next node
-  if (prev.type === 'title' || prev.type === 'ancestor-title' || prev.type === 'current-title') {
+  if (
+    prev.type === 'title' ||
+    prev.type === 'ancestor-title' ||
+    prev.type === 'current-title'
+  ) {
     if (curr.depth === prev.depth) return true;
   }
 
@@ -575,7 +598,11 @@ function checkMainContinuation(measurements, branchIndex, branchDepth) {
     // Skip nodes with colorIndex (branch children)
     if (node.colorIndex !== undefined) continue;
     // Found continuation at same or lower depth
-    if (node.type !== 'branch' && node.type !== 'editBranch' && node.depth <= branchDepth) {
+    if (
+      node.type !== 'branch' &&
+      node.type !== 'editBranch' &&
+      node.depth <= branchDepth
+    ) {
       return true;
     }
     // Another branch at same level - main continues through it
@@ -596,7 +623,12 @@ function createDotSvg(dot) {
     message: { r: 3, fill: color, stroke: 'none', strokeWidth: 0 },
     title: { r: 5, fill: color, stroke: 'none', strokeWidth: 0 },
     branch: { r: 4, fill: 'var(--bg, #0f0f11)', stroke: color, strokeWidth: 2 },
-    editBranch: { r: 3, fill: 'var(--bg, #0f0f11)', stroke: color, strokeWidth: 1.5 }
+    editBranch: {
+      r: 3,
+      fill: 'var(--bg, #0f0f11)',
+      stroke: color,
+      strokeWidth: 1.5
+    }
   };
 
   const style = styles[type] || styles.message;
@@ -863,23 +895,21 @@ function findMainLineContinuation(allNodes, branchIndex, branchDepth) {
  * @param {number|undefined} colorIndex - The color index to match (undefined for main line)
  * @returns {boolean} - True if a same-context continuation exists
  */
-function hasSameContextContinuation(nodes, startIndex, colorIndex) {
-  for (let j = startIndex; j < nodes.length; j++) {
-    const futureNode = nodes[j];
-    // Skip branch markers - they don't break context chains
-    if (futureNode.type === 'branch') continue;
-    // Check if this future node has the same context
-    const sameContext =
-      colorIndex === futureNode.colorIndex ||
-      (colorIndex === undefined && futureNode.colorIndex === undefined);
-    if (sameContext) {
-      return true;
+function buildNextContextByColorIndex(nodes) {
+  const seenKeys = new Set();
+  const nextByIndex = new Array(nodes.length).fill(false);
+
+  for (let i = nodes.length - 1; i >= 0; i -= 1) {
+    const node = nodes[i];
+    if (node.type === 'branch') {
+      continue;
     }
-    // Don't break early on different-context nodes - keep scanning
-    // The bug was: if (futureNode.colorIndex !== colorIndex) break;
-    // This would miss continuations that appear after intervening branches
+    const key = node.colorIndex === undefined ? 'main' : node.colorIndex;
+    nextByIndex[i] = seenKeys.has(key);
+    seenKeys.add(key);
   }
-  return false;
+
+  return nextByIndex;
 }
 
 /**
@@ -891,30 +921,23 @@ function hasSameContextContinuation(nodes, startIndex, colorIndex) {
  * @param {Object} referenceNode - The node to match against (must have depth and colorIndex)
  * @returns {boolean} - True if a matching node exists after startIndex
  */
-function hasSameContextAfter(nodes, startIndex, referenceNode) {
-  const refDepth = referenceNode.depth ?? 0;
-  const refColorIndex = referenceNode.colorIndex;
+function buildNextContextByDepthAndColor(nodes) {
+  const seenKeys = new Set();
+  const nextByIndex = new Array(nodes.length).fill(false);
 
-  for (let j = startIndex; j < nodes.length; j++) {
-    const futureNode = nodes[j];
-    // Skip branch markers - they don't break context chains
-    if (futureNode.type === 'branch') continue;
-
-    const futureDepth = futureNode.depth ?? 0;
-    const futureColorIndex = futureNode.colorIndex;
-
-    // Check if both depth AND colorIndex match
-    const sameDepth = futureDepth === refDepth;
-    const sameColorIndex =
-      refColorIndex === futureColorIndex ||
-      (refColorIndex === undefined && futureColorIndex === undefined);
-
-    if (sameDepth && sameColorIndex) {
-      return true;
+  for (let i = nodes.length - 1; i >= 0; i -= 1) {
+    const node = nodes[i];
+    if (node.type === 'branch') {
+      continue;
     }
-    // Don't break early - keep scanning past intervening branches
+    const depth = node.depth ?? 0;
+    const colorKey = node.colorIndex === undefined ? 'main' : node.colorIndex;
+    const key = `${depth}|${colorKey}`;
+    nextByIndex[i] = seenKeys.has(key);
+    seenKeys.add(key);
   }
-  return false;
+
+  return nextByIndex;
 }
 
 /**
@@ -926,6 +949,8 @@ function markTerminalNodes(nodes) {
   // 1. It's the last node, OR
   // 2. The next node is a branch (branches start new chains), OR
   // 3. The next node has a different colorIndex (different branch context)
+
+  const nextByColorIndex = buildNextContextByColorIndex(nodes);
 
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
@@ -970,13 +995,7 @@ function markTerminalNodes(nodes) {
 
     // If next node is a branch, check if there's a same-context continuation after it
     if (nextNode.type === 'branch') {
-      // Use helper that scans ALL nodes without early break
-      const sameContextContinues = hasSameContextContinuation(
-        nodes,
-        i + 1,
-        node.colorIndex
-      );
-      node.isTerminal = !sameContextContinues;
+      node.isTerminal = !nextByColorIndex[i];
       continue;
     }
 
@@ -996,8 +1015,8 @@ function markTerminalNodes(nodes) {
  * of the same depth and context (colorIndex). This lets connectors know
  * when to draw up/down stubs even if intervening nodes are at other depths.
  *
- * Uses explicit forward scanning to properly account for intervening branches
- * when determining hasNextContext (rather than a simple Set-based backward pass).
+ * Uses reverse-pass sets to account for intervening branches without O(n^2)
+ * scanning when determining hasNextContext.
  */
 function annotateContextContinuations(nodes) {
   const makeKey = (node) => `${node.depth ?? 0}|${node.colorIndex ?? 'main'}`;
@@ -1013,16 +1032,13 @@ function annotateContextContinuations(nodes) {
     seen.add(key);
   }
 
-  // Forward pass for hasNextContext: use explicit forward scan from each node
-  // This properly accounts for intervening branches when determining if
-  // there's a same-context continuation after the current node
+  const nextByDepthAndColor = buildNextContextByDepthAndColor(nodes);
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
     if (!shouldTrack(node)) {
       continue;
     }
-    // Scan forward from the next position to find same-context nodes
-    node.hasNextContext = hasSameContextAfter(nodes, i + 1, node);
+    node.hasNextContext = nextByDepthAndColor[i];
   }
 
   return nodes;
@@ -1200,12 +1216,6 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
     branchLabel
   } = node;
 
-  // Helper to fetch the rendered row element for a node (by id) if already in DOM
-  function prevNodeRow(n) {
-    if (!n) return null;
-    return treeRoot.querySelector(`[data-node-id="${n.id}"]`);
-  }
-
   const row = document.createElement('div');
   row.className = 'tree-node';
   row.dataset.nodeId = id;
@@ -1352,10 +1362,10 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
     // Use the parent/main-line color for the T junction; prefer previous non-branch color if available
     let prevColor = null;
     if (prevNode && prevNode.type !== 'branch') {
-      const prevEl = prevNodeRow(prevNode);
-      if (prevEl) {
-        prevColor =
-          getComputedStyle(prevEl).getPropertyValue('--color')?.trim() || null;
+      if (prevNode.colorIndex !== undefined && prevNode.colorIndex !== null) {
+        prevColor = getBranchColor(prevNode.colorIndex);
+      } else {
+        prevColor = getColor(prevNode.depth ?? 0);
       }
     }
     const mainColor = prevColor || getColor(depth ?? 0);
@@ -2606,35 +2616,49 @@ function initializeHeaderIcons() {
   // Search icon (in search wrapper)
   const searchPlaceholder = document.getElementById('search-icon-placeholder');
   if (searchPlaceholder) {
-    searchPlaceholder.innerHTML = Icon('search', { size: 'sm', width: 13, height: 13 });
+    searchPlaceholder.innerHTML = Icon('search', {
+      size: 'sm',
+      width: 13,
+      height: 13
+    });
   }
 
   // Info button (lightbulb icon)
-  const infoBtnPlaceholder = document.querySelector('#info-btn .icon-placeholder');
+  const infoBtnPlaceholder = document.querySelector(
+    '#info-btn .icon-placeholder'
+  );
   if (infoBtnPlaceholder) {
     infoBtnPlaceholder.innerHTML = Icon('lightbulb', { size: 'sm' });
   }
 
   // Export markdown button (download icon)
-  const exportPlaceholder = document.querySelector('#export-markdown .icon-placeholder');
+  const exportPlaceholder = document.querySelector(
+    '#export-markdown .icon-placeholder'
+  );
   if (exportPlaceholder) {
     exportPlaceholder.innerHTML = Icon('download', { size: 'sm' });
   }
 
   // Settings button (settings/gear icon)
-  const settingsPlaceholder = document.querySelector('#settings-btn .icon-placeholder');
+  const settingsPlaceholder = document.querySelector(
+    '#settings-btn .icon-placeholder'
+  );
   if (settingsPlaceholder) {
     settingsPlaceholder.innerHTML = Icon('settings', { size: 'sm' });
   }
 
   // Refresh button in settings modal
-  const refreshPlaceholder = document.querySelector('#refresh .icon-placeholder');
+  const refreshPlaceholder = document.querySelector(
+    '#refresh .icon-placeholder'
+  );
   if (refreshPlaceholder) {
     refreshPlaceholder.innerHTML = Icon('refresh', { size: 'sm' });
   }
 
   // Clear data button in settings modal (trash icon)
-  const clearDataPlaceholder = document.querySelector('#clear-data .icon-placeholder');
+  const clearDataPlaceholder = document.querySelector(
+    '#clear-data .icon-placeholder'
+  );
   if (clearDataPlaceholder) {
     clearDataPlaceholder.innerHTML = Icon('trash', { size: 'sm' });
   }
