@@ -403,7 +403,13 @@
         top: calc(-1 * var(--connector-overlap));
         bottom: calc(-1 * var(--connector-overlap));
         width: var(--connector-width);
-        background: var(--line-color, var(--border));
+        background: repeating-linear-gradient(
+          to bottom,
+          var(--line-color, var(--border)) 0px,
+          var(--line-color, var(--border)) 6px,
+          transparent 6px,
+          transparent 12px
+        );
         transform: translateX(-50%);
         opacity: 0.5;
         border-radius: 0;
@@ -454,8 +460,9 @@
 
       /* Branch card border matches branch color */
       .tree-node.is-branch .tree-card {
-        border-left: 2px solid var(--color, var(--branch));
+        border-left: 1px solid var(--color, var(--branch));
         border-radius: 5px;
+        box-shadow: inset 1px 0 0 var(--color, var(--branch));
       }
 
       /* Title node styles - minimal flat styling */
@@ -468,8 +475,9 @@
       .tree-node.is-title .tree-card {
         background: color-mix(in srgb, var(--accent) 5%, var(--surface));
         border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
-        border-left-width: 3px;
+        border-left-width: 1px;
         border-left-color: var(--accent);
+        box-shadow: inset 1px 0 0 var(--accent);
       }
 
       /* Ancestor title styling - muted flat */
@@ -499,7 +507,8 @@
         background: color-mix(in srgb, var(--accent) 8%, var(--surface));
         border-color: var(--accent);
         border-width: 1px;
-        border-left-width: 3px;
+        border-left-width: 1px;
+        box-shadow: inset 1px 0 0 var(--accent);
       }
 
       .tree-node.is-current-title .rail-dot {
@@ -512,7 +521,8 @@
       .tree-node.is-main-viewing .tree-card {
         background: color-mix(in srgb, var(--accent) 8%, var(--surface));
         border-color: var(--accent);
-        border-left-width: 3px;
+        border-left-width: 1px;
+        box-shadow: inset 1px 0 0 var(--accent);
       }
 
       .card-current-label {
@@ -551,7 +561,9 @@
       }
 
       .tree-node.is-current-path .tree-card {
-        border-left-width: 3px;
+        border-left-width: 1px;
+        box-shadow: inset 1px 0 0
+          color-mix(in srgb, var(--accent) 35%, transparent);
       }
 
       /* Current conversation nodes get subtle highlight */
@@ -595,7 +607,8 @@
           var(--surface)
         );
         border-color: var(--branch-color, var(--branch));
-        border-left-width: 3px;
+        border-left-width: 1px;
+        box-shadow: inset 1px 0 0 var(--branch-color, var(--branch));
       }
 
       .tree-node.is-branch.is-viewing .rail-dot {
@@ -1446,9 +1459,11 @@
       }
 
       .tree-node.is-edit-branch .tree-card {
-        border-left: 2px solid
+        border-left: 1px solid
           color-mix(in srgb, var(--accent) 60%, transparent);
         border-radius: 5px;
+        box-shadow: inset 1px 0 0
+          color-mix(in srgb, var(--accent) 60%, transparent);
         background: color-mix(in srgb, var(--accent) 4%, var(--surface));
       }
 
