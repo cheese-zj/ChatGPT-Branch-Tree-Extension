@@ -382,6 +382,9 @@ export class ChatGPTAdapter extends BaseAdapter {
             createTime: this.toSeconds(sib.createTime || 0),
             depth: 1,
             branchNodeId: sib.id,
+            editVersionIndex: sibIndex,
+            totalVersions: sortedSiblings.length,
+            siblingIds: sortedSiblings.map((s) => s.id),
             editVersionLabel: `Edit v${sibIndex}/${sortedSiblings.length}`,
             descendantCount: this._countDescendants(
               sib.id,
