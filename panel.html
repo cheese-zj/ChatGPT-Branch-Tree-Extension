@@ -241,12 +241,7 @@
       }
 
       .connector-dot {
-        transition: transform 0.1s ease;
-      }
-
-      #tree-root:has(.tree-node:hover) #tree-connectors .connector-dot,
-      #tree-connectors .connector-dot:hover {
-        transform: scale(1.2);
+        transition: opacity 0.1s ease;
       }
 
       /* Hide CSS rail-dot when SVG dots are active */
@@ -372,11 +367,19 @@
       }
 
       .tree-node:hover .tree-card {
-        border-color: color-mix(in srgb, var(--color, var(--accent)) 40%, var(--border));
+        border-color: color-mix(
+          in srgb,
+          var(--color, var(--accent)) 40%,
+          var(--border)
+        );
       }
 
       .tree-node.is-branch:hover .tree-card {
-        border-color: color-mix(in srgb, var(--color, var(--branch)) 50%, var(--border));
+        border-color: color-mix(
+          in srgb,
+          var(--color, var(--branch)) 50%,
+          var(--border)
+        );
       }
 
       /* Rail (visual connector) */
@@ -586,7 +589,11 @@
       }
 
       .tree-node.is-branch.is-viewing .tree-card {
-        background: color-mix(in srgb, var(--branch-color, var(--branch)) 10%, var(--surface));
+        background: color-mix(
+          in srgb,
+          var(--branch-color, var(--branch)) 10%,
+          var(--surface)
+        );
         border-color: var(--branch-color, var(--branch));
         border-left-width: 3px;
       }
@@ -603,7 +610,9 @@
         border-radius: 6px;
         padding: 8px 10px;
         min-width: 0;
-        transition: background 0.1s ease, border-color 0.1s ease;
+        transition:
+          background 0.1s ease,
+          border-color 0.1s ease;
       }
 
       .tree-card:hover {
