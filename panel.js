@@ -2031,24 +2031,37 @@ function hideTooltip() {
   }, 100);
 }
 
+function getEventTargetElement(event) {
+  const target = event?.target;
+  if (target instanceof Element) return target;
+  if (target?.parentElement instanceof Element) return target.parentElement;
+  return null;
+}
+
 // Delegated event handlers for tree nodes (single handler for all nodes)
 function setupTreeEventDelegation() {
   // Mouse events for tooltip
   treeRoot.addEventListener('mouseover', (e) => {
-    const node = e.target.closest('.tree-node');
+    const targetEl = getEventTargetElement(e);
+    if (!targetEl) return;
+    const node = targetEl.closest('.tree-node');
     if (node) {
       showTooltip(node, node.dataset.fullText, node.dataset.type);
     }
   });
 
   treeRoot.addEventListener('mouseout', (e) => {
-    const node = e.target.closest('.tree-node');
+    const targetEl = getEventTargetElement(e);
+    if (!targetEl) return;
+    const node = targetEl.closest('.tree-node');
     if (node) hideTooltip();
   });
 
   // Click handler using event delegation (no closure memory leaks)
   treeRoot.addEventListener('click', (e) => {
-    const arrow = e.target.closest('.version-arrow');
+    const targetEl = getEventTargetElement(e);
+    if (!targetEl) return;
+    const arrow = targetEl.closest('.version-arrow');
     if (arrow) {
       e.preventDefault();
       e.stopPropagation();
@@ -2060,21 +2073,23 @@ function setupTreeEventDelegation() {
         return;
       }
 
-      const node = e.target.closest('.tree-node');
+      const node = targetEl.closest('.tree-node');
       const nodeId = node?.dataset?.nodeId;
       const nodeData = nodeDataMap.get(nodeId);
       const direction = parseInt(arrow.dataset.direction, 10);
 
       if (nodeData && Number.isFinite(direction)) {
+        const targetMessageId = resolveVersionTargetId(nodeData, direction, 1);
         requestEditVersionSwitch({
           messageId: nodeData.id,
-          direction
+          direction,
+          targetMessageId
         });
       }
       return;
     }
 
-    const node = e.target.closest('.tree-node');
+    const node = targetEl.closest('.tree-node');
     if (!node) return;
 
     const nodeId = node.dataset.nodeId;
@@ -2122,11 +2137,29 @@ function resolveEditBranchSwitch(node) {
   return {
     messageId: currentId,
     direction: targetIndex > currentIndex ? 1 : -1,
-    steps: Math.abs(targetIndex - currentIndex)
+    steps: Math.abs(targetIndex - currentIndex),
+    targetMessageId: node.branchNodeId
   };
 }
 
-async function requestEditVersionSwitch({ messageId, direction, steps = 1 }) {
+function resolveVersionTargetId(node, direction, steps) {
+  if (!node?.siblingIds || node.siblingIds.length === 0) return null;
+  let currentIndex = node.siblingIds.indexOf(node.id);
+  if (currentIndex < 0 && Number.isFinite(node.editVersionIndex)) {
+    currentIndex = node.editVersionIndex - 1;
+  }
+  if (currentIndex < 0) return null;
+  const targetIndex = currentIndex + direction * steps;
+  if (targetIndex < 0 || targetIndex >= node.siblingIds.length) return null;
+  return node.siblingIds[targetIndex];
+}
+
+async function requestEditVersionSwitch({
+  messageId,
+  direction,
+  steps = 1,
+  targetMessageId
+}) {
   if (!activeTabId || !messageId || !direction) return;
 
   const normalizedDirection = direction < 0 ? -1 : 1;
@@ -2139,7 +2172,8 @@ async function requestEditVersionSwitch({ messageId, direction, steps = 1 }) {
     messageId,
     direction: normalizedDirection,
     steps: stepCount,
-    platform
+    platform,
+    targetMessageId
   });
 
   if (resp?.ok) {

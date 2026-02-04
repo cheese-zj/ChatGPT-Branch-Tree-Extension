@@ -41,7 +41,10 @@ const USE_GRAPH_BUILDER = true; // Enabled for testing
 
 // Platform URL patterns for detection
 const PLATFORM_URL_PATTERNS = {
-  chatgpt: [/^https:\/\/(www\.)?chatgpt\.com/, /^https:\/\/(www\.)?chat\.openai\.com/],
+  chatgpt: [
+    /^https:\/\/(www\.)?chatgpt\.com/,
+    /^https:\/\/(www\.)?chat\.openai\.com/
+  ],
   claude: [/^https:\/\/(www\.)?claude\.ai/],
   gemini: [/^https:\/\/(www\.)?gemini\.google\.com/],
   perplexity: [/^https:\/\/(www\.)?perplexity\.ai/]
@@ -275,6 +278,17 @@ async function clearConversationCache() {
     if (keysToRemove.length > 0) {
       await chrome.storage.local.remove(keysToRemove);
     }
+  } catch {
+    // Ignore storage errors silently
+  }
+}
+
+async function clearConversationCacheById(conversationId) {
+  if (!conversationId) return;
+  memoryCache.delete(conversationId);
+  const key = `${CONV_CACHE_PREFIX}${conversationId}`;
+  try {
+    await chrome.storage.local.remove(key);
   } catch {
     // Ignore storage errors silently
   }
@@ -2101,20 +2115,48 @@ function scrollToMessage(nodeId, platform) {
   return true;
 }
 
-function isButtonDisabled(btn) {
-  if (!btn) return true;
-  if (btn.disabled) return true;
-  const aria = btn.getAttribute('aria-disabled') || '';
-  if (aria.toLowerCase() === 'true') return true;
-  return btn.classList.contains('disabled');
+async function scrollToMessageWithRetry(nodeId, platform, attempts = 6) {
+  if (!nodeId) return false;
+  for (let i = 0; i < attempts; i++) {
+    if (scrollToMessage(nodeId, platform)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 250 + i * 150));
+  }
+  return false;
 }
 
-function getButtonLabel(btn) {
+function isButtonDisabled(el) {
+  if (!el) return true;
+  if ('disabled' in el && el.disabled) return true;
+  const aria = el.getAttribute?.('aria-disabled') || '';
+  if (aria.toLowerCase() === 'true') return true;
+  if (el.classList?.contains('disabled')) return true;
+  if (el.classList?.contains('is-disabled')) return true;
+  return false;
+}
+
+function getButtonLabel(el) {
+  if (!el?.getAttribute) return el?.textContent || '';
+  const labelledBy = el.getAttribute('aria-labelledby');
+  if (labelledBy) {
+    const text = labelledBy
+      .split(/\s+/)
+      .map((id) => document.getElementById(id)?.textContent || '')
+      .join(' ')
+      .trim();
+    if (text) return text;
+  }
   return (
-    btn.getAttribute('aria-label') ||
-    btn.getAttribute('title') ||
-    btn.textContent ||
+    el.getAttribute('aria-label') ||
+    el.getAttribute('title') ||
+    el.textContent ||
     ''
+  );
+}
+
+function getControlElements(root) {
+  if (!root?.querySelectorAll) return [];
+  return Array.from(
+    root.querySelectorAll('button, [role="button"], a[role="button"]')
   );
 }
 
@@ -2137,7 +2179,7 @@ function pickPrevNextFromButtons(buttons, { allowAnyPair = false } = {}) {
 function getSearchRoots(messageEl) {
   const roots = [messageEl];
   if (messageEl?.parentElement) roots.push(messageEl.parentElement);
-  const article = messageEl?.closest('[role="article"]');
+  const article = messageEl?.closest('[role="article"], article');
   if (article) roots.push(article);
   const container = messageEl?.closest(
     '[data-message-id], [data-testid*="message"], [data-testid*="conversation-turn"], [class*="message"]'
@@ -2150,31 +2192,43 @@ function findVersionControls(messageEl, platform) {
   if (!messageEl) return null;
 
   const roots = getSearchRoots(messageEl);
-  const versionPattern = /\b\d+\s*\/\s*\d+\b/;
+  const versionPattern = /\bv?\d+\s*(?:\/|of)\s*\d+\b/i;
 
   for (const root of roots) {
     const candidates = Array.from(
-      root.querySelectorAll('span, div, button')
+      root.querySelectorAll('span, div, button, p, a')
     ).filter((el) => versionPattern.test(el.textContent || ''));
 
     for (const labelEl of candidates) {
-      const container = labelEl.closest('div') || labelEl.parentElement;
-      if (!container) continue;
-      const buttons = Array.from(container.querySelectorAll('button'));
-      const found = pickPrevNextFromButtons(buttons, { allowAnyPair: true });
-      if (found) return found;
+      const containers = [];
+      const closestContainer =
+        labelEl.closest('[role="group"], [class*="version"], div') ||
+        labelEl.parentElement;
+      if (closestContainer) containers.push(closestContainer);
+      if (closestContainer?.parentElement)
+        containers.push(closestContainer.parentElement);
+      if (labelEl.parentElement && labelEl.parentElement !== closestContainer) {
+        containers.push(labelEl.parentElement);
+      }
+      for (const container of containers) {
+        const buttons = getControlElements(container);
+        const found = pickPrevNextFromButtons(buttons, { allowAnyPair: true });
+        if (found) return found;
+      }
     }
   }
 
   for (const root of roots) {
-    const buttons = Array.from(root.querySelectorAll('button'));
+    const buttons = getControlElements(root);
     const found = pickPrevNextFromButtons(buttons);
     if (found && (found.prev || found.next)) return found;
   }
 
   if (platform !== 'chatgpt') {
     const pageButtons = Array.from(
-      document.querySelectorAll('button[aria-label], button[title]')
+      document.querySelectorAll(
+        'button[aria-label], button[title], [role="button"][aria-label], [role="button"][title]'
+      )
     ).filter((btn) => {
       const label = getButtonLabel(btn);
       return /prev|previous|next|later|version|draft|edit/i.test(label);
@@ -2191,29 +2245,51 @@ async function handleSwitchEditVersion({
   messageId,
   direction,
   steps = 1,
-  platform: requestedPlatform
+  platform: requestedPlatform,
+  targetMessageId
 }) {
   const platform = requestedPlatform || detectPlatform();
   if (!platform) return { ok: false, error: 'Unsupported platform' };
 
   injectStyles();
-  const messageEl = findMessageElement(messageId, platform);
+  let messageEl = findMessageElement(messageId, platform);
   if (!messageEl) return { ok: false, error: 'Message not found' };
+  try {
+    messageEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } catch {
+    // Ignore scroll failures
+  }
 
   const normalizedDirection = direction < 0 ? -1 : 1;
   const stepCount = Math.max(1, Number.isFinite(steps) ? Math.abs(steps) : 1);
+  const scrollTargetId = targetMessageId || messageId;
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    const controls = findVersionControls(messageEl, platform);
+    if (attempt > 0) {
+      messageEl = findMessageElement(messageId, platform) || messageEl;
+    }
+    let controls = findVersionControls(messageEl, platform);
     if (controls) {
-      const btn = normalizedDirection < 0 ? controls.prev : controls.next;
-      if (!btn || isButtonDisabled(btn)) {
-        return { ok: false, error: 'Version control unavailable' };
-      }
       for (let i = 0; i < stepCount; i++) {
+        const btn = normalizedDirection < 0 ? controls.prev : controls.next;
+        if (!btn || isButtonDisabled(btn)) {
+          return { ok: false, error: 'Version control unavailable' };
+        }
         btn.click();
+        if (i < stepCount - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          messageEl = findMessageElement(messageId, platform) || messageEl;
+          const nextControls = findVersionControls(messageEl, platform);
+          if (nextControls) controls = nextControls;
+        }
       }
-      scrollToMessage(messageId, platform);
+      if (platform === 'chatgpt') {
+        const convId = getConversationId(platform);
+        if (convId) {
+          await clearConversationCacheById(convId);
+        }
+      }
+      await scrollToMessageWithRetry(scrollTargetId, platform);
       scheduleRefresh(200);
       return { ok: true };
     }
@@ -2967,8 +3043,14 @@ function computeTreeSignature(result) {
       nodeCount: result.nodes?.length || 0,
       // Use summary of node content to detect changes without full serialization
       nodesSummary:
-        result.nodes?.map((n) => `${n.id}:${n.text?.slice(0, 50)}`).join('|') ||
-        ''
+        result.nodes
+          ?.map(
+            (n) =>
+              `${n.id}:${n.text?.slice(0, 50)}:${n.editVersionIndex || ''}/${
+                n.totalVersions || ''
+              }`
+          )
+          .join('|') || ''
     });
   } catch {
     return '';
