@@ -1632,6 +1632,48 @@ function drawBackbones() {
     });
 
     treeRoot.appendChild(fragment);
+
+    // Calculate dynamic heights for expanded branch connectors
+    // Expanded branches connect to their first child at depth + 1
+    for (const m of measurements) {
+      if (m.type === 'branch' && m.isExpanded) {
+        const branchDepth = m.depth;
+        const childDepth = branchDepth + 1;
+        const childList = nodesByDepth.get(childDepth) || [];
+
+        // Find the first child node that appears after this expanded branch
+        // (first node at depth+1 whose top is greater than this branch's top)
+        const firstChild = childList
+          .filter((c) => c.top > m.top)
+          .sort((a, b) => a.top - b.top)[0];
+
+        if (firstChild) {
+          // Calculate the gap from the branch's rail-dot to the child's rail-dot
+          // The rail-dot is vertically centered in each node
+          // We need the distance from branch dot bottom to child dot top
+          const branchDotEl = m.node.querySelector('.rail-dot');
+          const childDotEl = firstChild.node.querySelector('.rail-dot');
+
+          if (branchDotEl && childDotEl) {
+            const branchDotRect = branchDotEl.getBoundingClientRect();
+            const childDotRect = childDotEl.getBoundingClientRect();
+            // Gap from bottom of branch dot to top of child dot
+            const gap = childDotRect.top - branchDotRect.bottom;
+            // Add overlap to ensure seamless connection
+            const connectorOverlap = 2; // matches --connector-overlap
+            const height = Math.max(0, gap + connectorOverlap);
+
+            // Set the CSS variable on the rail-connector element
+            const connector = m.node.querySelector(
+              '.rail-connector.branch-expanded'
+            );
+            if (connector) {
+              connector.style.setProperty('--expanded-branch-gap', `${height}px`);
+            }
+          }
+        }
+      }
+    }
   });
 }
 
@@ -2246,9 +2288,56 @@ function setupGlobalListeners() {
   setupKeyboardNavigation();
 }
 
+// ============================================
+// Header Icon Initialization
+// ============================================
+
+/**
+ * Initialize header icons by injecting SVGs into placeholder elements
+ * Uses the Icon() function with consistent stroke-width (1.5) and sizing
+ */
+function initializeHeaderIcons() {
+  // Search icon (in search wrapper)
+  const searchPlaceholder = document.getElementById('search-icon-placeholder');
+  if (searchPlaceholder) {
+    searchPlaceholder.innerHTML = Icon('search', { size: 'sm', width: 13, height: 13 });
+  }
+
+  // Info button (lightbulb icon)
+  const infoBtnPlaceholder = document.querySelector('#info-btn .icon-placeholder');
+  if (infoBtnPlaceholder) {
+    infoBtnPlaceholder.innerHTML = Icon('lightbulb', { size: 'sm' });
+  }
+
+  // Export markdown button (download icon)
+  const exportPlaceholder = document.querySelector('#export-markdown .icon-placeholder');
+  if (exportPlaceholder) {
+    exportPlaceholder.innerHTML = Icon('download', { size: 'sm' });
+  }
+
+  // Settings button (settings/gear icon)
+  const settingsPlaceholder = document.querySelector('#settings-btn .icon-placeholder');
+  if (settingsPlaceholder) {
+    settingsPlaceholder.innerHTML = Icon('settings', { size: 'sm' });
+  }
+
+  // Refresh button in settings modal
+  const refreshPlaceholder = document.querySelector('#refresh .icon-placeholder');
+  if (refreshPlaceholder) {
+    refreshPlaceholder.innerHTML = Icon('refresh', { size: 'sm' });
+  }
+
+  // Clear data button in settings modal (trash icon)
+  const clearDataPlaceholder = document.querySelector('#clear-data .icon-placeholder');
+  if (clearDataPlaceholder) {
+    clearDataPlaceholder.innerHTML = Icon('trash', { size: 'sm' });
+  }
+}
+
 // Initialize
 async function init() {
   await loadSettings();
+  initializeHeaderIcons();
   setupGlobalListeners();
   refresh();
 }
