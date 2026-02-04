@@ -184,6 +184,16 @@ export function buildTreeFromGraph(graph, currentConversationId, branchData) {
       const nodeB = graph.getNode(b);
       return nodeA.createTime - nodeB.createTime;
     });
+    const hasSiblings = siblingArray.length > 1;
+    const editVersionIndex = hasSiblings ? siblingArray.indexOf(msgId) + 1 : 1;
+
+    if (hasSiblings) {
+      const currentNode = displayNodes[displayNodes.length - 1];
+      currentNode.hasEditVersions = true;
+      currentNode.editVersionIndex = editVersionIndex;
+      currentNode.totalVersions = siblingArray.length;
+      currentNode.siblingIds = siblingArray;
+    }
 
     siblingArray.forEach((sibId, index) => {
       if (sibId === msgId || visited.has(sibId)) return;
@@ -196,7 +206,11 @@ export function buildTreeFromGraph(graph, currentConversationId, branchData) {
         text: sibNode.text,
         createTime: sibNode.createTime,
         depth: 1,
-        editVersionLabel: `v${index + 1}/${siblingArray.length}`,
+        branchNodeId: sibId,
+        editVersionIndex: index + 1,
+        totalVersions: siblingArray.length,
+        siblingIds: siblingArray,
+        editVersionLabel: `Edit v${index + 1}/${siblingArray.length}`,
         icon: 'edit',
         targetConversationId: currentConversationId
       });
