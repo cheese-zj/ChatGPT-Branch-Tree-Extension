@@ -280,6 +280,396 @@ const BRANCH_COLORS = [
 ];
 
 // ============================================
+// SVG Connector System
+// ============================================
+
+const RAIL_SIZE = 20; // matches --rail-size CSS variable
+
+let connectorSvg = null;
+let connectorRafId = null;
+
+/**
+ * Initialize or get the SVG layer for connectors
+ */
+function getConnectorSvg() {
+  if (connectorSvg && connectorSvg.parentNode === treeRoot) {
+    return connectorSvg;
+  }
+
+  // Create SVG element
+  connectorSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  connectorSvg.id = 'tree-connectors';
+  connectorSvg.setAttribute('aria-hidden', 'true');
+  connectorSvg.style.cssText = `
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    pointer-events: none;
+    z-index: 0;
+    overflow: visible;
+  `;
+
+  // Insert as first child of treeRoot (behind nodes)
+  treeRoot.insertBefore(connectorSvg, treeRoot.firstChild);
+  return connectorSvg;
+}
+
+/**
+ * Measure node positions for connector generation
+ */
+function measureNodePositions() {
+  const nodes = Array.from(treeRoot.querySelectorAll('.tree-node'));
+  if (nodes.length === 0) return [];
+
+  const rootRect = treeRoot.getBoundingClientRect();
+
+  return nodes.map((node, index) => {
+    const depth = parseInt(node.dataset.depth || '0', 10);
+    const dot = node.querySelector('.rail-dot');
+    const dotRect = dot?.getBoundingClientRect();
+
+    // Calculate dot center relative to treeRoot
+    const dotCenter = dotRect
+      ? {
+          x: dotRect.left - rootRect.left + dotRect.width / 2,
+          y: dotRect.top - rootRect.top + treeRoot.scrollTop + dotRect.height / 2
+        }
+      : { x: 0, y: 0 };
+
+    return {
+      index,
+      id: node.dataset.nodeId,
+      type: node.dataset.type || 'message',
+      depth,
+      color: node.dataset.color || getColor(depth),
+      colorIndex: node.dataset.colorIndex,
+      dotCenter,
+      isExpanded: node.classList.contains('is-expanded'),
+      isTerminal: node.classList.contains('is-terminal'),
+      hasPrevContext: node.dataset.hasPrevContext === 'true',
+      hasNextContext: node.dataset.hasNextContext === 'true',
+      top: node.offsetTop,
+      bottom: node.offsetTop + node.offsetHeight
+    };
+  });
+}
+
+/**
+ * Generate SVG path data for an L-curve (branch junction)
+ */
+function createLCurvePath(startX, startY, endX, endY, radius = 12) {
+  // L-curve: vertical down, then curved corner, then horizontal
+  const curveEndY = endY;
+  const curveStartY = Math.min(startY, endY - radius);
+
+  return `M ${startX} ${startY} L ${startX} ${curveStartY} Q ${startX} ${curveEndY} ${startX + radius} ${curveEndY} L ${endX} ${curveEndY}`;
+}
+
+/**
+ * Generate backbone paths to bridge gaps between nodes of the same depth
+ */
+function generateBackbonePaths(measurements) {
+  const paths = [];
+  const nodesByDepth = new Map();
+
+  for (const measurement of measurements) {
+    const list = nodesByDepth.get(measurement.depth) || [];
+    list.push(measurement);
+    nodesByDepth.set(measurement.depth, list);
+  }
+
+  nodesByDepth.forEach((list, depth) => {
+    list.sort((a, b) => a.top - b.top);
+    let lastColor = null;
+
+    for (let i = 0; i < list.length - 1; i++) {
+      const current = list[i];
+      const next = list[i + 1];
+      const inheritedColor = current.color || lastColor || getColor(depth);
+      lastColor = inheritedColor;
+
+      const gap = next.top - current.bottom;
+      if (gap <= 4) continue;
+
+      const hasInterveningNodes = next.index > current.index + 1;
+      if (!hasInterveningNodes) continue;
+
+      if (
+        (current.type === 'branch' && !current.isExpanded) ||
+        current.type === 'editBranch'
+      ) {
+        continue;
+      }
+
+      const x = depth * RAIL_SIZE + RAIL_SIZE / 2;
+      const startY = current.dotCenter.y;
+      const endY = next.dotCenter.y;
+
+      if (!Number.isFinite(startY) || !Number.isFinite(endY)) continue;
+
+      paths.push({
+        type: 'backbone',
+        d: `M ${x} ${startY} L ${x} ${endY}`,
+        color: inheritedColor,
+        order: 0
+      });
+    }
+  });
+
+  return paths;
+}
+
+/**
+ * Generate all connector paths from node measurements
+ */
+function generateConnectorPaths(measurements) {
+  const paths = [];
+  const dots = [];
+
+  for (let i = 0; i < measurements.length; i++) {
+    const curr = measurements[i];
+    const prev = i > 0 ? measurements[i - 1] : null;
+    const next = i < measurements.length - 1 ? measurements[i + 1] : null;
+
+    const isBranch = curr.type === 'branch';
+    const isEditBranch = curr.type === 'editBranch';
+    const isTitle =
+      curr.type === 'title' ||
+      curr.type === 'ancestor-title' ||
+      curr.type === 'current-title';
+
+    // Determine dot style
+    let dotType = 'message';
+    if (isTitle) dotType = 'title';
+    else if (isBranch) dotType = 'branch';
+    else if (isEditBranch) dotType = 'editBranch';
+
+    dots.push({
+      x: curr.dotCenter.x,
+      y: curr.dotCenter.y,
+      color: curr.color,
+      type: dotType,
+      isExpanded: curr.isExpanded
+    });
+
+    // Branch connectors: L-curve from parent depth
+    if (isBranch || isEditBranch) {
+      const parentDepth = curr.depth - 1;
+      const parentX = parentDepth * RAIL_SIZE + RAIL_SIZE / 2;
+
+      // Find the Y position to start the L-curve from
+      // Look for the previous node at parent depth or use a reasonable default
+      let startY = curr.dotCenter.y - 40;
+      for (let j = i - 1; j >= 0; j--) {
+        const prevNode = measurements[j];
+        if (prevNode.depth === parentDepth && prevNode.type !== 'branch' && prevNode.type !== 'editBranch') {
+          startY = prevNode.dotCenter.y;
+          break;
+        }
+        // Also connect from a branch that continues the main line
+        if (prevNode.depth === parentDepth && prevNode.type === 'branch') {
+          startY = prevNode.dotCenter.y;
+          break;
+        }
+      }
+
+      paths.push({
+        type: 'l-curve',
+        d: createLCurvePath(parentX, startY, curr.dotCenter.x, curr.dotCenter.y, 12),
+        color: curr.color,
+        order: 2
+      });
+
+      // If main line continues past this branch, draw vertical line through
+      const mainContinues = checkMainContinuation(measurements, i, curr.depth);
+      if (mainContinues) {
+        const mainColor = getColor(parentDepth);
+        // Draw vertical line segment through the branch point
+        paths.push({
+          type: 'vertical',
+          d: `M ${parentX} ${curr.dotCenter.y - 15} L ${parentX} ${curr.dotCenter.y + 15}`,
+          color: mainColor,
+          order: 0
+        });
+      }
+    }
+
+    // Vertical connectors for same-context chains
+    if (!isBranch && !isEditBranch && prev) {
+      const shouldConnect = shouldConnectVertical(prev, curr, measurements, i);
+
+      if (shouldConnect) {
+        const x = curr.dotCenter.x;
+        paths.push({
+          type: 'vertical',
+          d: `M ${x} ${prev.dotCenter.y} L ${x} ${curr.dotCenter.y}`,
+          color: curr.color,
+          order: 1
+        });
+      }
+    }
+
+    // Expanded branch: line down to children
+    if (isBranch && curr.isExpanded && next) {
+      // Find the first child (next node at depth + 1 with same colorIndex)
+      for (let j = i + 1; j < measurements.length; j++) {
+        const child = measurements[j];
+        if (child.depth === curr.depth + 1 && child.colorIndex === curr.colorIndex) {
+          paths.push({
+            type: 'vertical',
+            d: `M ${curr.dotCenter.x} ${curr.dotCenter.y} L ${curr.dotCenter.x} ${child.dotCenter.y}`,
+            color: curr.color,
+            order: 1
+          });
+          break;
+        }
+        // Stop if we hit a node at same or lower depth
+        if (child.depth <= curr.depth) break;
+      }
+    }
+  }
+
+  paths.push(...generateBackbonePaths(measurements));
+
+  // Sort by order for proper layering
+  paths.sort((a, b) => a.order - b.order);
+
+  return { paths, dots };
+}
+
+/**
+ * Check if vertical connection should be made between two nodes
+ */
+function shouldConnectVertical(prev, curr, measurements, currIndex) {
+  // Don't connect from branches (they use L-curves)
+  if (prev.type === 'branch' && !prev.isExpanded) return false;
+
+  // Connect if same depth and same color context
+  if (prev.depth === curr.depth) {
+    // Same colorIndex means same branch context
+    if (prev.colorIndex === curr.colorIndex) return true;
+    // Both undefined colorIndex means main line
+    if (prev.colorIndex === undefined && curr.colorIndex === undefined) return true;
+  }
+
+  // Connect from expanded branch to its children
+  if (prev.type === 'branch' && prev.isExpanded && curr.depth === prev.depth + 1) {
+    if (curr.colorIndex === prev.colorIndex) return true;
+  }
+
+  // Connect from title to next node
+  if (prev.type === 'title' || prev.type === 'ancestor-title' || prev.type === 'current-title') {
+    if (curr.depth === prev.depth) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if main line continues after a branch
+ */
+function checkMainContinuation(measurements, branchIndex, branchDepth) {
+  for (let i = branchIndex + 1; i < measurements.length; i++) {
+    const node = measurements[i];
+    // Skip nodes with colorIndex (branch children)
+    if (node.colorIndex !== undefined) continue;
+    // Found continuation at same or lower depth
+    if (node.type !== 'branch' && node.type !== 'editBranch' && node.depth <= branchDepth) {
+      return true;
+    }
+    // Another branch at same level - main continues through it
+    if (node.type === 'branch' && node.depth === branchDepth) {
+      continue;
+    }
+  }
+  return false;
+}
+
+/**
+ * Render SVG dot based on type
+ */
+function createDotSvg(dot) {
+  const { x, y, color, type, isExpanded } = dot;
+
+  const styles = {
+    message: { r: 3, fill: color, stroke: 'none', strokeWidth: 0 },
+    title: { r: 5, fill: color, stroke: 'none', strokeWidth: 0 },
+    branch: { r: 4, fill: 'var(--bg, #0f0f11)', stroke: color, strokeWidth: 2 },
+    editBranch: { r: 3, fill: 'var(--bg, #0f0f11)', stroke: color, strokeWidth: 1.5 }
+  };
+
+  const style = styles[type] || styles.message;
+
+  // Expanded branches get filled
+  if (type === 'branch' && isExpanded) {
+    style.fill = color;
+  }
+
+  return `<circle cx="${x}" cy="${y}" r="${style.r}" fill="${style.fill}" stroke="${style.stroke}" stroke-width="${style.strokeWidth}" class="connector-dot connector-dot--${type}"/>`;
+}
+
+/**
+ * Update the SVG layer with paths and dots
+ */
+function updateSvgLayer(paths, dots) {
+  const svg = getConnectorSvg();
+  const height = treeRoot.scrollHeight || treeRoot.offsetHeight;
+
+  svg.setAttribute('viewBox', `0 0 ${treeRoot.offsetWidth} ${height}`);
+  svg.style.height = `${height}px`;
+
+  const pathsHtml = paths
+    .map(
+      (p, i) =>
+        `<path d="${p.d}" stroke="${p.color}" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" class="connector-path connector-path--${p.type}" style="--path-index: ${i}"/>`
+    )
+    .join('');
+
+  const dotsHtml = dots.map((d) => createDotSvg(d)).join('');
+
+  svg.innerHTML = `
+    <g class="connector-paths">${pathsHtml}</g>
+    <g class="connector-dots">${dotsHtml}</g>
+  `;
+}
+
+/**
+ * Main function to render all connectors
+ * Replaces the old drawBackbones() function
+ */
+function renderConnectors() {
+  if (connectorRafId) {
+    cancelAnimationFrame(connectorRafId);
+  }
+
+  connectorRafId = requestAnimationFrame(() => {
+    connectorRafId = null;
+
+    const measurements = measureNodePositions();
+    if (measurements.length === 0) {
+      // Clear SVG if no nodes
+      const svg = getConnectorSvg();
+      svg.innerHTML = '';
+      return;
+    }
+
+    const { paths, dots } = generateConnectorPaths(measurements);
+    updateSvgLayer(paths, dots);
+  });
+}
+
+// Resize handler to update SVG connectors when panel resizes
+let resizeRafId = null;
+window.addEventListener('resize', () => {
+  if (resizeRafId) cancelAnimationFrame(resizeRafId);
+  resizeRafId = requestAnimationFrame(() => {
+    resizeRafId = null;
+    renderConnectors();
+  });
+});
+
+// ============================================
 // Icon System
 // ============================================
 
@@ -820,6 +1210,12 @@ function createNodeElement(node, index, total, prevNode, nextNode, allNodes) {
   row.className = 'tree-node';
   row.dataset.nodeId = id;
   row.dataset.depth = depth ?? 0;
+  row.dataset.type = type;
+  if (colorIndex !== undefined && colorIndex !== null) {
+    row.dataset.colorIndex = colorIndex;
+  }
+  if (hasPrevContext) row.dataset.hasPrevContext = 'true';
+  if (hasNextContext) row.dataset.hasNextContext = 'true';
   row.tabIndex = 0;
   // Staggered animation delay (max 15 nodes, 30ms each)
   row.style.animationDelay = `${Math.min(index, 15) * 30}ms`;
@@ -1581,134 +1977,10 @@ function renderTree(nodes, title, hasAncestry = false) {
   });
   treeRoot.appendChild(fragment);
 
-  // Draw colored backbones per depth to bridge gaps (stops at last node)
-  drawBackbones();
+  // Render SVG connectors
+  renderConnectors();
 
   return true; // Indicate that rendering actually occurred
-}
-
-/**
- * Draw small backbone segments only across vertical gaps between nodes of the same depth.
- * Keeps the existing node connectors untouched and only fills missing segments.
- * Uses requestAnimationFrame to batch reads and writes for performance.
- */
-let backboneRafId = null;
-
-function drawBackbones() {
-  // Cancel any pending backbone draw
-  if (backboneRafId) {
-    cancelAnimationFrame(backboneRafId);
-  }
-
-  backboneRafId = requestAnimationFrame(() => {
-    backboneRafId = null;
-
-    // Remove existing backbones
-    treeRoot.querySelectorAll('.tree-backbone').forEach((el) => el.remove());
-
-    const nodes = Array.from(treeRoot.querySelectorAll('.tree-node'));
-    if (nodes.length === 0) return;
-
-    const railSize = 20; // matches --rail-size
-
-    // Batch read: collect all measurements first
-    const measurements = nodes.map((node) => ({
-      node,
-      type: node.dataset.type || '',
-      depth: parseInt(node.dataset.depth || '0', 10),
-      top: node.offsetTop,
-      bottom: node.offsetTop + node.offsetHeight,
-      color: node.dataset.color?.trim() || '',
-      isExpanded: node.classList.contains('is-expanded')
-    }));
-
-    // Group by depth
-    const nodesByDepth = new Map();
-    for (const m of measurements) {
-      const entry = nodesByDepth.get(m.depth) || [];
-      entry.push(m);
-      nodesByDepth.set(m.depth, entry);
-    }
-
-    // Batch write: create all backbone elements
-    const fragment = document.createDocumentFragment();
-
-    nodesByDepth.forEach((list, depth) => {
-      list.sort((a, b) => a.top - b.top);
-      let lastColor = null;
-      for (let i = 0; i < list.length - 1; i++) {
-        const current = list[i];
-        const next = list[i + 1];
-        const inheritedColor = current.color || lastColor || getColor(depth);
-        lastColor = inheritedColor;
-        const gap = next.top - current.bottom;
-
-        if (gap <= 4) continue;
-
-        // Do not extend from collapsed branches or edit branches
-        if (
-          (current.type === 'branch' && !current.isExpanded) ||
-          current.type === 'editBranch'
-        ) {
-          continue;
-        }
-
-        const backbone = document.createElement('div');
-        backbone.className = 'tree-backbone';
-        backbone.style.background = inheritedColor;
-        backbone.style.left = `${depth * railSize + railSize / 2 - 1}px`;
-        const topPos = current.bottom - 6;
-        const height = gap + 30;
-        backbone.style.top = `${topPos}px`;
-        backbone.style.height = `${height}px`;
-        fragment.appendChild(backbone);
-      }
-    });
-
-    treeRoot.appendChild(fragment);
-
-    // Calculate dynamic heights for expanded branch connectors
-    // Expanded branches connect to their first child at depth + 1
-    for (const m of measurements) {
-      if (m.type === 'branch' && m.isExpanded) {
-        const branchDepth = m.depth;
-        const childDepth = branchDepth + 1;
-        const childList = nodesByDepth.get(childDepth) || [];
-
-        // Find the first child node that appears after this expanded branch
-        // (first node at depth+1 whose top is greater than this branch's top)
-        const firstChild = childList
-          .filter((c) => c.top > m.top)
-          .sort((a, b) => a.top - b.top)[0];
-
-        if (firstChild) {
-          // Calculate the gap from the branch's rail-dot to the child's rail-dot
-          // The rail-dot is vertically centered in each node
-          // We need the distance from branch dot bottom to child dot top
-          const branchDotEl = m.node.querySelector('.rail-dot');
-          const childDotEl = firstChild.node.querySelector('.rail-dot');
-
-          if (branchDotEl && childDotEl) {
-            const branchDotRect = branchDotEl.getBoundingClientRect();
-            const childDotRect = childDotEl.getBoundingClientRect();
-            // Gap from bottom of branch dot to top of child dot
-            const gap = childDotRect.top - branchDotRect.bottom;
-            // Add overlap to ensure seamless connection
-            const connectorOverlap = 2; // matches --connector-overlap
-            const height = Math.max(0, gap + connectorOverlap);
-
-            // Set the CSS variable on the rail-connector element
-            const connector = m.node.querySelector(
-              '.rail-connector.branch-expanded'
-            );
-            if (connector) {
-              connector.style.setProperty('--expanded-branch-gap', `${height}px`);
-            }
-          }
-        }
-      }
-    }
-  });
 }
 
 // ============================================
