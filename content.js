@@ -6,12 +6,9 @@
 
 'use strict';
 
-import { detectPlatformFromUrl } from './core/platform-registry.js';
-import { injectFetchInterceptor } from './core/fetch-interceptor-factory.js';
-import { STORAGE_KEYS, CACHE_TTL } from './core/storage.js';
-
 // Lazy-load ES modules to avoid static import errors in classic content scripts.
 let graphModulesPromise = null;
+let fetchInterceptorPromise = null;
 
 function loadGraphModules() {
   if (!graphModulesPromise) {
@@ -26,6 +23,15 @@ function loadGraphModules() {
   return graphModulesPromise;
 }
 
+function loadFetchInterceptor() {
+  if (!fetchInterceptorPromise) {
+    fetchInterceptorPromise = import(
+      chrome.runtime.getURL('core/fetch-interceptor-factory.js')
+    ).then((module) => module.injectFetchInterceptor);
+  }
+  return fetchInterceptorPromise;
+}
+
 // Feature flag for graph builder (Phase 1: ChatGPT only)
 const USE_GRAPH_BUILDER = true; // Enabled for testing
 
@@ -33,22 +39,35 @@ const USE_GRAPH_BUILDER = true; // Enabled for testing
 // Platform Detection
 // ============================================
 
-// Platform detection is now centralized in core/platform-registry.js
+// Platform URL patterns for detection
+const PLATFORM_URL_PATTERNS = {
+  chatgpt: [/^https:\/\/(www\.)?chatgpt\.com/, /^https:\/\/(www\.)?chat\.openai\.com/],
+  claude: [/^https:\/\/(www\.)?claude\.ai/],
+  gemini: [/^https:\/\/(www\.)?gemini\.google\.com/],
+  perplexity: [/^https:\/\/(www\.)?perplexity\.ai/]
+};
+
 function detectPlatform() {
-  return detectPlatformFromUrl(window.location.href);
+  const url = window.location.href;
+  if (!url) return null;
+  for (const [platformId, patterns] of Object.entries(PLATFORM_URL_PATTERNS)) {
+    if (patterns.some((pattern) => pattern.test(url))) {
+      return platformId;
+    }
+  }
+  return null;
 }
 
 // ============================================
 // Storage Helpers
 // ============================================
 
-// Storage keys and TTL values are imported from core/storage.js
-// Aliases for backward compatibility with existing code
-const STORAGE_KEY = STORAGE_KEYS.BRANCH_DATA;
-const CONV_CACHE_PREFIX = STORAGE_KEYS.CONV_CACHE_PREFIX;
-const CURRENT_CONV_TTL_MS = CACHE_TTL.CURRENT_CONVERSATION;
-const HISTORY_CONV_TTL_MS = CACHE_TTL.HISTORY_CONVERSATION;
-const TOKEN_TTL_MS = CACHE_TTL.ACCESS_TOKEN;
+// Storage keys (inlined from core/storage.js)
+const STORAGE_KEY = 'chatgpt_branch_data';
+const CONV_CACHE_PREFIX = 'conv_cache_';
+const CURRENT_CONV_TTL_MS = 2 * 60 * 1000; // 2 minutes
+const HISTORY_CONV_TTL_MS = 15 * 60 * 1000; // 15 minutes
+const TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 const memoryCache = new Map();
 const MAX_CACHE_SIZE = 50;
@@ -2957,16 +2976,22 @@ function init() {
   // Primary detection is via fetch interceptor events
   if (platform === 'claude') {
     startPolling(2000); // Poll every 2s as fallback
-    injectFetchInterceptor('claude');
+    loadFetchInterceptor().then((injectFetchInterceptor) => {
+      injectFetchInterceptor('claude');
+    });
   }
 
   // Inject fetch interceptors for other platforms to capture raw Markdown
   if (platform === 'gemini') {
-    injectFetchInterceptor('gemini');
+    loadFetchInterceptor().then((injectFetchInterceptor) => {
+      injectFetchInterceptor('gemini');
+    });
   }
 
   if (platform === 'perplexity') {
-    injectFetchInterceptor('perplexity');
+    loadFetchInterceptor().then((injectFetchInterceptor) => {
+      injectFetchInterceptor('perplexity');
+    });
   }
 
   scheduleRefresh(100);

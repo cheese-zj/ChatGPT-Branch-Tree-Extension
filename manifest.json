@@ -39,7 +39,11 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["core/conversation-graph.js", "core/tree-builder.js"],
+      "resources": [
+        "core/conversation-graph.js",
+        "core/tree-builder.js",
+        "core/fetch-interceptor-factory.js"
+      ],
       "matches": [
         "https://chatgpt.com/*",
         "https://chat.openai.com/*",
