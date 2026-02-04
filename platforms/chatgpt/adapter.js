@@ -9,6 +9,169 @@ import * as storage from '../../core/storage.js';
 // Constants
 const TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minute TTL for access token
 
+const CHATGPT_INTERNAL_MESSAGE_TYPES = new Set([
+  'analysis',
+  'thinking',
+  'thought',
+  'reasoning',
+  'tool_call',
+  'tool_calls',
+  'tool_result',
+  'tool_response',
+  'function_call',
+  'function_result',
+  'browser_call',
+  'browser_result',
+  'system',
+  'internal'
+]);
+
+const CHATGPT_INTERNAL_CONTENT_TYPES = new Set([
+  'analysis',
+  'thinking',
+  'thought',
+  'reasoning',
+  'tool_call',
+  'tool_calls',
+  'tool_result',
+  'tool_response',
+  'function_call',
+  'function_result',
+  'browser_call',
+  'browser_result',
+  'system',
+  'internal'
+]);
+
+const CHATGPT_TOOL_CALL_KEYS = new Set([
+  'search_query',
+  'open',
+  'find',
+  'click',
+  'screenshot',
+  'image_query',
+  'browser',
+  'web',
+  'finance',
+  'weather',
+  'sports',
+  'calculator',
+  'time'
+]);
+
+const CHATGPT_TOOL_CALL_HINTS = Array.from(CHATGPT_TOOL_CALL_KEYS);
+
+function getChatGPTContentType(message) {
+  const content = message?.content;
+  const rawType =
+    content?.content_type || content?.contentType || content?.type || '';
+  if (!rawType || typeof rawType !== 'string') return '';
+  return rawType.toLowerCase();
+}
+
+function hasInternalMetadata(message) {
+  const metadata = message?.metadata;
+  if (!metadata || typeof metadata !== 'object') return false;
+
+  if (metadata.is_internal === true) return true;
+  if (metadata.is_hidden === true) return true;
+  if (metadata.is_hidden_from_conversation === true) return true;
+  if (metadata.hidden === true) return true;
+  if (metadata.is_visible === false) return true;
+
+  const messageType = `${metadata.message_type || metadata.type || ''}`
+    .toLowerCase()
+    .trim();
+  if (messageType && CHATGPT_INTERNAL_MESSAGE_TYPES.has(messageType)) {
+    return true;
+  }
+
+  const finishType = `${metadata.finish_details?.type || ''}`
+    .toLowerCase()
+    .trim();
+  if (finishType && CHATGPT_INTERNAL_MESSAGE_TYPES.has(finishType)) {
+    return true;
+  }
+
+  const recipient = metadata.recipient;
+  if (
+    typeof recipient === 'string' &&
+    recipient.trim() &&
+    recipient !== 'all'
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function looksLikeToolCall(text) {
+  if (!text) return false;
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return false;
+
+  const lower = trimmed.toLowerCase();
+  const hasHint = CHATGPT_TOOL_CALL_HINTS.some(
+    (hint) => lower.includes(`"${hint}"`) || lower.includes(`'${hint}'`)
+  );
+  if (!hasHint) return false;
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return false;
+    }
+
+    const keys = Object.keys(parsed);
+    if (keys.length === 0) return false;
+
+    const allToolKeys = keys.every((key) => CHATGPT_TOOL_CALL_KEYS.has(key));
+    if (allToolKeys) return true;
+
+    const toolName =
+      parsed.tool || parsed.tool_name || parsed.name || parsed.function;
+    const args = parsed.args || parsed.arguments || parsed.params;
+    if (
+      typeof toolName === 'string' &&
+      CHATGPT_TOOL_CALL_KEYS.has(toolName) &&
+      typeof args === 'object'
+    ) {
+      return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function isThinkingLabel(text) {
+  if (!text) return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  if (
+    /^thought for\s+\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds|m|min|mins|minutes|h|hr|hrs|hours)?$/i.test(
+      trimmed
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    /^reasoned for\s+\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds|m|min|mins|minutes|h|hr|hrs|hours)?$/i.test(
+      trimmed
+    )
+  ) {
+    return true;
+  }
+
+  if (/^thinking\.{0,3}$/i.test(trimmed)) return true;
+  if (/^reasoning\.{0,3}$/i.test(trimmed)) return true;
+
+  return false;
+}
+
 /**
  * ChatGPT Platform Adapter
  */
@@ -254,7 +417,7 @@ export class ChatGPTAdapter extends BaseAdapter {
       if (!text || !text.trim()) continue;
 
       // Filter internal messages
-      if (this._isInternalMessage(text)) continue;
+      if (this._isInternalMessage(msg, text)) continue;
 
       // Check for siblings (edit versions)
       const parentId = parentMap[nodeId];
@@ -335,7 +498,7 @@ export class ChatGPTAdapter extends BaseAdapter {
 
       const text = this.extractText(msg);
       if (!text || !text.trim()) continue;
-      if (this._isInternalMessage(text)) continue;
+      if (this._isInternalMessage(msg, text)) continue;
 
       const parent = parentMap[nodeId];
       const siblings = parent ? childrenMap[parent] || [] : [];
@@ -371,6 +534,7 @@ export class ChatGPTAdapter extends BaseAdapter {
           const sibText = sibMsg ? this.extractText(sibMsg) : '';
           const sibRole = sibMsg?.author?.role;
           if (!sibText || !sibText.trim()) continue;
+          if (this._isInternalMessage(sibMsg, sibText)) continue;
 
           const sibIndex = sortedSiblings.findIndex((s) => s.id === sib.id) + 1;
 
@@ -474,7 +638,7 @@ export class ChatGPTAdapter extends BaseAdapter {
       if (entry.parent === parentId && entry.message) {
         const msg = entry.message;
         const text = this.extractText(msg);
-        if (text && !this._isInternalMessage(text)) {
+        if (text && !this._isInternalMessage(msg, text)) {
           siblings.push({
             versionId: id,
             text,
@@ -494,12 +658,29 @@ export class ChatGPTAdapter extends BaseAdapter {
 
   /**
    * Check if message is internal ChatGPT message
+   * @param {Object} message - Raw message object
    * @param {string} text - Message text
    * @returns {boolean}
    */
-  _isInternalMessage(text) {
-    if (!text) return false;
-    return text.startsWith('Original custom instructions');
+  _isInternalMessage(message, text) {
+    if (!text && !message) return false;
+    const normalizedText = typeof text === 'string' ? text.trim() : '';
+    if (normalizedText.startsWith('Original custom instructions')) return true;
+
+    const contentType = getChatGPTContentType(message);
+    if (contentType && CHATGPT_INTERNAL_CONTENT_TYPES.has(contentType)) {
+      return true;
+    }
+
+    if (hasInternalMetadata(message)) return true;
+
+    const role = message?.author?.role || message?.role;
+    if (role === 'assistant') {
+      if (isThinkingLabel(normalizedText)) return true;
+      if (looksLikeToolCall(normalizedText)) return true;
+    }
+
+    return false;
   }
 
   // ============================================
@@ -642,7 +823,7 @@ export class ChatGPTAdapter extends BaseAdapter {
 
       const text = this.extractText(msg);
       if (!text || !text.trim()) continue;
-      if (this._isInternalMessage(text)) continue;
+      if (this._isInternalMessage(msg, text)) continue;
 
       const createTime = msg.create_time || 0;
       const timestampSeconds = Math.floor(this.toSeconds(createTime));
