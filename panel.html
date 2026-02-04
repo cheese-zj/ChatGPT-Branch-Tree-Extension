@@ -436,12 +436,12 @@
         position: absolute;
         left: calc(-0.5 * var(--rail-size) - 1px);
         bottom: 49%;
-        width: calc(0.5 * var(--rail-size) + 2px);
+        width: calc(0.5 * var(--rail-size) + var(--connector-width));
         height: 94%;
         background: transparent;
-        border-left: 2px solid var(--color, var(--branch));
-        border-bottom: 2px solid var(--color, var(--branch));
-        border-radius: 0 0 0 16px;
+        border-left: var(--connector-width) solid var(--color, var(--branch));
+        border-bottom: var(--connector-width) solid var(--color, var(--branch));
+        border-radius: 0 0 0 var(--branch-curve-radius);
         box-sizing: border-box;
       }
 
@@ -452,7 +452,7 @@
         left: 0;
         top: 50%;
         width: 6px;
-        height: 2px;
+        height: var(--connector-width);
         background: var(--color, var(--branch));
         transform: translateY(-50%);
         border-radius: 0;
