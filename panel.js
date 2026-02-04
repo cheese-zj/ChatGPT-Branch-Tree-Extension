@@ -485,6 +485,41 @@ function hasSameContextContinuation(nodes, startIndex, colorIndex) {
 }
 
 /**
+ * Check if there is a same-context node after a given index that matches
+ * both the depth AND colorIndex of a reference node.
+ * Used to determine hasNextContext for connector rendering.
+ * @param {Array} nodes - The flat array of nodes
+ * @param {number} startIndex - Index to start scanning from (exclusive of current node)
+ * @param {Object} referenceNode - The node to match against (must have depth and colorIndex)
+ * @returns {boolean} - True if a matching node exists after startIndex
+ */
+function hasSameContextAfter(nodes, startIndex, referenceNode) {
+  const refDepth = referenceNode.depth ?? 0;
+  const refColorIndex = referenceNode.colorIndex;
+
+  for (let j = startIndex; j < nodes.length; j++) {
+    const futureNode = nodes[j];
+    // Skip branch markers - they don't break context chains
+    if (futureNode.type === 'branch') continue;
+
+    const futureDepth = futureNode.depth ?? 0;
+    const futureColorIndex = futureNode.colorIndex;
+
+    // Check if both depth AND colorIndex match
+    const sameDepth = futureDepth === refDepth;
+    const sameColorIndex =
+      refColorIndex === futureColorIndex ||
+      (refColorIndex === undefined && futureColorIndex === undefined);
+
+    if (sameDepth && sameColorIndex) {
+      return true;
+    }
+    // Don't break early - keep scanning past intervening branches
+  }
+  return false;
+}
+
+/**
  * Mark terminal nodes in the node array
  * A terminal node is one that has no subsequent nodes in its visual chain
  */
@@ -562,11 +597,15 @@ function markTerminalNodes(nodes) {
  * Annotate nodes with whether there is a previous/next straight-line node
  * of the same depth and context (colorIndex). This lets connectors know
  * when to draw up/down stubs even if intervening nodes are at other depths.
+ *
+ * Uses explicit forward scanning to properly account for intervening branches
+ * when determining hasNextContext (rather than a simple Set-based backward pass).
  */
 function annotateContextContinuations(nodes) {
   const makeKey = (node) => `${node.depth ?? 0}|${node.colorIndex ?? 'main'}`;
   const shouldTrack = (node) => node.type !== 'branch';
 
+  // Forward pass for hasPrevContext: use Set to track what we've seen
   const seen = new Set();
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
@@ -576,13 +615,16 @@ function annotateContextContinuations(nodes) {
     seen.add(key);
   }
 
-  const seenFromEnd = new Set();
-  for (let i = nodes.length - 1; i >= 0; i--) {
+  // Forward pass for hasNextContext: use explicit forward scan from each node
+  // This properly accounts for intervening branches when determining if
+  // there's a same-context continuation after the current node
+  for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
-    if (!shouldTrack(node)) continue;
-    const key = makeKey(node);
-    node.hasNextContext = seenFromEnd.has(key);
-    seenFromEnd.add(key);
+    if (!shouldTrack(node)) {
+      continue;
+    }
+    // Scan forward from the next position to find same-context nodes
+    node.hasNextContext = hasSameContextAfter(nodes, i + 1, node);
   }
 
   return nodes;
