@@ -992,6 +992,86 @@ function extractClaudeMessagesFromApi(data) {
   return { messages: extractedMessages, conversationId, title };
 }
 
+/**
+ * Build Claude edit branch nodes from API messages.
+ * Keeps the latest version visible and adds edit branches for older versions.
+ * @param {Message[]} messages
+ * @returns {Message[]}
+ */
+function buildClaudeEditBranchNodes(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return messages;
+
+  const messageById = new Map();
+  for (const msg of messages) {
+    if (msg?.id) {
+      messageById.set(msg.id, msg);
+    }
+  }
+
+  const processedGroups = new Set();
+  const groupedIds = new Set();
+  const visibleIds = new Set();
+  const editBranches = [];
+
+  for (const msg of messages) {
+    const siblingIds = Array.isArray(msg.siblingIds) ? msg.siblingIds : [];
+    if (siblingIds.length < 2) continue;
+
+    const siblingMessages = siblingIds
+      .map((id) => messageById.get(id))
+      .filter((sibling) => sibling && sibling.text);
+
+    if (siblingMessages.length < 2) continue;
+
+    siblingMessages.sort((a, b) => (a.createTime || 0) - (b.createTime || 0));
+
+    const orderedIds = siblingMessages.map((sibling) => sibling.id);
+    const groupKey = orderedIds.join('|');
+    if (processedGroups.has(groupKey)) continue;
+    processedGroups.add(groupKey);
+
+    const currentMessage = siblingMessages[siblingMessages.length - 1];
+    const totalVersions = siblingMessages.length;
+    const currentIndex = orderedIds.indexOf(currentMessage.id);
+
+    orderedIds.forEach((id) => groupedIds.add(id));
+
+    currentMessage.hasEditVersions = true;
+    currentMessage.editVersionIndex = currentIndex + 1;
+    currentMessage.totalVersions = totalVersions;
+    currentMessage.siblingIds = orderedIds;
+    visibleIds.add(currentMessage.id);
+
+    siblingMessages.forEach((sibling, index) => {
+      if (sibling.id === currentMessage.id) return;
+
+      editBranches.push({
+        id: `edit-branch:${sibling.id}`,
+        type: 'editBranch',
+        role: sibling.role,
+        text: sibling.text,
+        createTime: sibling.createTime,
+        depth: 1,
+        branchNodeId: sibling.id,
+        editVersionIndex: index + 1,
+        totalVersions,
+        siblingIds: orderedIds,
+        editVersionLabel: `Edit v${index + 1}/${totalVersions}`,
+        icon: 'edit'
+      });
+    });
+  }
+
+  const baseMessages = messages.filter((msg) => {
+    const siblingIds = Array.isArray(msg.siblingIds) ? msg.siblingIds : [];
+    if (siblingIds.length < 2) return true;
+    if (!groupedIds.has(msg.id)) return true;
+    return visibleIds.has(msg.id);
+  });
+
+  return [...baseMessages, ...editBranches];
+}
+
 async function fetchClaudeConversation(conversationId) {
   const orgId = getClaudeOrgId();
   if (!orgId) {
@@ -1456,14 +1536,17 @@ function extractClaudeMessages(minLength = MIN_MESSAGE_LENGTH) {
         role: msg.role,
         text: msg.text,
         createTime: msg.createTime || Date.now() / 1000,
-        hasEditVersions: false
+        hasEditVersions: Boolean(msg.hasEditVersions),
+        editVersionIndex: msg.editVersionIndex,
+        totalVersions: msg.totalVersions,
+        siblingIds: msg.siblingIds
       });
       index++;
     }
 
     // If we got messages from API, return them
     if (messages.length > 0) {
-      return messages;
+      return buildClaudeEditBranchNodes(messages);
     }
   }
 
@@ -2900,7 +2983,9 @@ function extractChatGPTMessagesForExport(mapping, currentNode) {
  * @returns {Array} - Array of messages
  */
 function extractClaudeMessagesForExport() {
-  const domMessages = extractClaudeMessages(1);
+  const domMessages = extractClaudeMessages(1).filter(
+    (msg) => msg.type !== 'editBranch'
+  );
   return domMessages.map((msg, index) => {
     const content = msg.text || '';
     return {
