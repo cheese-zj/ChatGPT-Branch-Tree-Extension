@@ -87,8 +87,9 @@ export const PLATFORM_CONFIGS = {
     id: 'chatgpt',
     name: 'ChatGPT',
     urlPatterns: [
-      /^https:\/\/(www\.)?chatgpt\.com/,
-      /^https:\/\/(www\.)?chat\.openai\.com/
+      // Exclude non-chat product pages such as /codex.
+      /^https:\/\/(www\.)?chatgpt\.com(?!\/codex(?:[/?#]|$))/,
+      /^https:\/\/(www\.)?chat\.openai\.com(?!\/codex(?:[/?#]|$))/
     ],
     color: '#10a37f'
   },
