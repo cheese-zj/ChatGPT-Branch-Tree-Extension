@@ -2799,8 +2799,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           } catch {
             // Ignore
           }
-          // Reload the page to reflect the branch switch
-          location.reload();
+          // Refresh tree data without forcing a page reload
+          scheduleRefresh(200);
           sendResponse({ ok: true });
         } else {
           sendResponse({
