@@ -2154,18 +2154,45 @@ function resolveVersionTargetId(node, direction, steps) {
   return node.siblingIds[targetIndex];
 }
 
+async function requestChatGPTBranchSwitch(targetMessageId) {
+  if (!activeTabId || !targetMessageId) return;
+
+  setStatus('Switching branch...', 'loading');
+  const resp = await tabsSendMessageSafe(activeTabId, {
+    type: 'SWITCH_CHATGPT_BRANCH',
+    branchNodeId: targetMessageId
+  });
+
+  if (resp?.ok) {
+    setStatus('Branch switched', 'success');
+  } else {
+    setStatus(resp?.error || 'Switch failed');
+  }
+}
+
 async function requestEditVersionSwitch({
   messageId,
   direction,
   steps = 1,
   targetMessageId
 }) {
-  if (!activeTabId || !messageId || !direction) return;
+  if (!activeTabId) return;
+
+  const platform = detectPlatformFromUrl(activeTabInfo?.url || '');
+  if (platform === 'chatgpt') {
+    if (!targetMessageId) {
+      setStatus('Switch failed');
+      return;
+    }
+    await requestChatGPTBranchSwitch(targetMessageId);
+    return;
+  }
+
+  if (!messageId || !direction) return;
 
   const normalizedDirection = direction < 0 ? -1 : 1;
   const stepCount = Math.max(1, Number.isFinite(steps) ? Math.abs(steps) : 1);
 
-  const platform = detectPlatformFromUrl(activeTabInfo?.url || '');
   setStatus('Switching version...', 'loading');
   const resp = await tabsSendMessageSafe(activeTabId, {
     type: 'SWITCH_EDIT_VERSION',
@@ -2208,12 +2235,19 @@ async function handleNodeClick(node) {
   try {
     // Handle edit branch clicks - switch edit version in place
     if (type === 'editBranch' && branchNodeId) {
-      const resolved = resolveEditBranchSwitch(node);
-      if (!resolved) {
-        setStatus('Switch failed');
-        return;
+      const platform = detectPlatformFromUrl(activeTabInfo?.url || '');
+      if (platform === 'chatgpt') {
+        await requestEditVersionSwitch({
+          targetMessageId: branchNodeId
+        });
+      } else {
+        const resolved = resolveEditBranchSwitch(node);
+        if (!resolved) {
+          setStatus('Switch failed');
+          return;
+        }
+        await requestEditVersionSwitch(resolved);
       }
-      await requestEditVersionSwitch(resolved);
       return;
     }
 
