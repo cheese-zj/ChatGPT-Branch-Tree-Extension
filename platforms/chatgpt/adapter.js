@@ -211,7 +211,9 @@ export class ChatGPTAdapter extends BaseAdapter {
   // ============================================
 
   matchUrl(url) {
-    return /^https:\/\/(www\.)?(chatgpt\.com|chat\.openai\.com)/i.test(url);
+    return /^https:\/\/(www\.)?(chatgpt\.com|chat\.openai\.com)(?!\/codex(?:[/?#]|$))/i.test(
+      url
+    );
   }
 
   getConversationId() {

@@ -42,8 +42,8 @@ const USE_GRAPH_BUILDER = true; // Enabled for testing
 // Platform URL patterns for detection
 const PLATFORM_URL_PATTERNS = {
   chatgpt: [
-    /^https:\/\/(www\.)?chatgpt\.com/,
-    /^https:\/\/(www\.)?chat\.openai\.com/
+    /^https:\/\/(www\.)?chatgpt\.com(?!\/codex(?:[/?#]|$))/,
+    /^https:\/\/(www\.)?chat\.openai\.com(?!\/codex(?:[/?#]|$))/
   ],
   claude: [/^https:\/\/(www\.)?claude\.ai/],
   gemini: [/^https:\/\/(www\.)?gemini\.google\.com/],

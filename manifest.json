@@ -32,6 +32,12 @@
         "https://perplexity.ai/*",
         "https://www.perplexity.ai/*"
       ],
+      "exclude_matches": [
+        "https://chatgpt.com/codex*",
+        "https://www.chatgpt.com/codex*",
+        "https://chat.openai.com/codex*",
+        "https://www.chat.openai.com/codex*"
+      ],
       "js": ["content.js"],
       "type": "module",
       "run_at": "document_idle"
